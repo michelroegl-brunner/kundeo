@@ -4,6 +4,28 @@ Open-source CRM for the DACH market. Self-hostable (AGPLv3), with a planned
 hosted version. Stack: Next.js (App Router) · React 19 · Prisma · PostgreSQL ·
 Tailwind v4 · Better Auth. Turborepo monorepo, pnpm.
 
+## Product principle — OSS / self-hosted first, hosting always in mind
+
+We build **self-hosted first**: every feature must work fully on a single
+self-hosted instance with no external paid service required (auth, storage,
+email all have a self-contained default). We never ship something that only
+works on the hosted version.
+
+At the same time we **never design ourselves into a corner** for hosting:
+
+- Everything is scoped to an organization (tenant) from day one, even though a
+  self-host instance runs a single org — so multi-org hosting needs no reshape.
+- No assumption of exactly one org, one user, or localhost anywhere in the
+  domain logic. Secrets and URLs come from env, never hardcoded.
+- Anything hosting needs but self-host doesn't (billing, plan limits, org
+  provisioning, usage metering) is an **additive layer** (separate package /
+  route group / env-gated feature flags), never a change to core tables or
+  flows. When a feature could differ between editions, gate it behind a
+  capability/flag rather than forking the code.
+- Keep external dependencies swappable behind an interface (email sender,
+  file storage) so self-host uses a local/simple default and hosted swaps the
+  implementation via config — not via code changes.
+
 ## Layout
 
 - `apps/web` — Next.js app (App Router, `output: "standalone"` for Docker).
