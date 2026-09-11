@@ -252,6 +252,7 @@ model Deal {
   contactId      String?
   ownerId        String?
   expectedCloseAt DateTime?
+  renewalAt      DateTime?
   closedAt       DateTime?
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

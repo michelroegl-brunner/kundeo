@@ -70,6 +70,14 @@ function contactId(loaded: LoadedRecord | null): string | null {
   return null;
 }
 
+function companyId(loaded: LoadedRecord | null): string | null {
+  if (!loaded) return null;
+  if (loaded.type === "Company") return loaded.data.id;
+  if (loaded.type === "Deal" || loaded.type === "Contact") return loaded.data.companyId ?? null;
+  if (loaded.type === "Task") return loaded.data.contact?.companyId ?? loaded.data.deal?.companyId ?? null;
+  return null;
+}
+
 /** The contact an email would go to: the record itself, or its deal's/task's contact. */
 function recipientContact(loaded: LoadedRecord | null): { email?: string | null; emailConsent?: boolean } | null {
   if (!loaded) return null;
@@ -268,6 +276,88 @@ async function startSubflow(ctx: ActionContext): Promise<ActionOutcome> {
   };
 }
 
+/**
+ * Create a new record from an automation. `recordType` picks what to create;
+ * each kind links back to the triggering record where it makes sense (a new
+ * contact inherits the deal's company, a new deal inherits the record's company
+ * and contact). A deal lands in the org's default pipeline's first stage. The
+ * required identifying field per kind is validated here and skipped with a
+ * plain reason when missing, rather than creating a half-empty record.
+ */
+async function createRecord(ctx: ActionContext): Promise<ActionOutcome> {
+  const kind = str(ctx.config.recordType);
+  if (!kind) return { status: "SKIPPED", message: "Kein Datensatztyp gewählt" };
+
+  if (kind === "task") {
+    const title = str(ctx.config.title);
+    if (!title) return { status: "SKIPPED", message: "Kein Aufgabentitel gesetzt" };
+    const dueDays = Number(str(ctx.config.dueDays) ?? "");
+    const dueAt = Number.isFinite(dueDays) ? new Date(Date.now() + dueDays * 86_400_000) : null;
+    await ctx.tx.activity.create({
+      data: {
+        organizationId: ctx.organizationId,
+        type: "TASK",
+        subject: title,
+        dueAt,
+        dealId: dealId(ctx.loaded),
+        contactId: contactId(ctx.loaded),
+        authorId: null,
+      },
+    });
+    return { status: "OK", message: `Aufgabe angelegt: „${title}“` };
+  }
+
+  if (kind === "company") {
+    const name = str(ctx.config.name);
+    if (!name) return { status: "SKIPPED", message: "Kein Firmenname gesetzt" };
+    await ctx.tx.company.create({ data: { organizationId: ctx.organizationId, name } });
+    return { status: "OK", message: `Firma angelegt: „${name}“` };
+  }
+
+  if (kind === "contact") {
+    const lastName = str(ctx.config.lastName);
+    if (!lastName) return { status: "SKIPPED", message: "Kein Nachname gesetzt" };
+    await ctx.tx.contact.create({
+      data: {
+        organizationId: ctx.organizationId,
+        firstName: str(ctx.config.firstName) ?? "",
+        lastName,
+        email: str(ctx.config.email) ?? null,
+        companyId: companyId(ctx.loaded),
+      },
+    });
+    return { status: "OK", message: `Kontakt angelegt: „${lastName}“` };
+  }
+
+  if (kind === "deal") {
+    const title = str(ctx.config.title);
+    if (!title) return { status: "SKIPPED", message: "Kein Deal-Titel gesetzt" };
+    // Land the deal in the org's default pipeline (or the first one) and its
+    // lowest-order stage — a new deal always starts at the beginning.
+    const pipeline = await ctx.tx.pipeline.findFirst({
+      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
+      select: { id: true, stages: { orderBy: { order: "asc" }, take: 1, select: { id: true } } },
+    });
+    const stageId = pipeline?.stages[0]?.id;
+    if (!pipeline || !stageId) return { status: "ERROR", message: "Keine Pipeline mit Phase vorhanden", errorCode: "NO_PIPELINE" };
+    const cents = parseMoneyToCents(str(ctx.config.amount));
+    await ctx.tx.deal.create({
+      data: {
+        organizationId: ctx.organizationId,
+        title,
+        amountCents: cents ?? 0,
+        pipelineId: pipeline.id,
+        stageId,
+        companyId: companyId(ctx.loaded),
+        contactId: contactId(ctx.loaded),
+      },
+    });
+    return { status: "OK", message: `Deal angelegt: „${title}“` };
+  }
+
+  return { status: "SKIPPED", message: `Datensatztyp „${kind}“ wird nicht unterstützt` };
+}
+
 async function notify(ctx: ActionContext): Promise<ActionOutcome> {
   const text = str(ctx.config.text) ?? "Automation-Benachrichtigung";
   // No internal notification channel exists yet; the run log is the record of it.
@@ -276,9 +366,7 @@ async function notify(ctx: ActionContext): Promise<ActionOutcome> {
 }
 
 /** Actions with no runtime executor yet — skipped honestly, never faked. */
-const NOT_YET: Record<string, string> = {
-  "record.create": "Datensatz anlegen wird noch nicht ausgeführt",
-};
+const NOT_YET: Record<string, string> = {};
 
 type Executor = (ctx: ActionContext) => Promise<ActionOutcome>;
 
@@ -292,6 +380,7 @@ const EXECUTORS: Record<string, Executor> = {
   notify,
   webhook: callWebhookAction,
   "field.set": setField,
+  "record.create": createRecord,
   subflow: startSubflow,
 };
 

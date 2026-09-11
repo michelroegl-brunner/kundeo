@@ -20,6 +20,8 @@ import {
   FIELDS,
   OPERATORS,
   TOKENS,
+  RECORD_TYPES,
+  RELATIVE_DATE_FIELDS,
   type FlowStep,
   type FieldDef,
   type FilterClause,
@@ -47,6 +49,11 @@ const DUE = [
 ];
 const STAGES = ["Lead", "Qualifiziert", "Angebot", "Verhandlung"];
 const UNITS = ["Minuten", "Stunden", "Tage", "Wochen"];
+const OFFSET_UNITS = ["Tage", "Wochen"];
+const OFFSET_DIRS = [
+  { value: "vor", label: "davor" },
+  { value: "nach", label: "danach" },
+];
 
 type Cfg = Record<string, unknown>;
 
@@ -220,6 +227,58 @@ function ConsentBlock({ checked, onChange }: { checked: boolean; onChange: (v: b
   );
 }
 
+/**
+ * The relative trigger's timing picker: a date field plus "N Tage/Wochen
+ * davor/danach". No expressions — the three plain controls fully define when it
+ * fires. We also store the derived `offsetDays` (negative = before) that the
+ * engine reads directly.
+ */
+function RelativeTiming({
+  field,
+  amount,
+  unit,
+  dir,
+  onChange,
+}: {
+  field: string;
+  amount: string;
+  unit: string;
+  dir: string;
+  onChange: (patch: Cfg) => void;
+}) {
+  const commit = (next: { field?: string; amount?: string; unit?: string; dir?: string }) => {
+    const f = next.field ?? field;
+    const a = next.amount ?? amount;
+    const u = next.unit ?? unit;
+    const d = next.dir ?? dir;
+    const n = Math.abs(Math.round(Number(a) || 0));
+    const days = n * (u === "Wochen" ? 7 : 1);
+    onChange({ field: f, offsetAmount: a, offsetUnit: u, offsetDir: d, offsetDays: d === "vor" ? -days : days });
+  };
+  return (
+    <div className="flex flex-col gap-3 rounded-md border border-edge bg-surface-page p-3">
+      <Field label="Datum" required hint="Nur echte Datumsfelder">
+        <Select
+          placeholder="Datum wählen"
+          value={field}
+          onChange={(e) => commit({ field: e.target.value })}
+          options={RELATIVE_DATE_FIELDS}
+        />
+      </Field>
+      <Field label="Zeitpunkt">
+        <div className="grid grid-cols-[90px_1fr_1fr] gap-2">
+          <Input size="sm" mono align="right" value={amount} onChange={(e) => commit({ amount: e.target.value })} />
+          <Select size="sm" value={unit} onChange={(e) => commit({ unit: e.target.value })} options={OFFSET_UNITS} />
+          <Select size="sm" value={dir} onChange={(e) => commit({ dir: e.target.value })} options={OFFSET_DIRS} />
+        </div>
+      </Field>
+      <p className="text-2xs leading-normal text-content-muted">
+        Läuft täglich ab 08:00 Uhr und prüft, welche Deals den gewählten Abstand zum Datum erreichen.
+      </p>
+    </div>
+  );
+}
+
 export function ConfigPanel({
   step,
   onChange,
@@ -257,6 +316,15 @@ export function ConfigPanel({
         <Field label="Auslöser" hint="Womit startet die Automation?">
           <Select value={step.type} onChange={(e) => setType(e.target.value)} options={TRIGGERS.map((i) => ({ value: i.type, label: i.name }))} />
         </Field>
+        {step.type === "relative" ? (
+          <RelativeTiming
+            field={s("field")}
+            amount={s("offsetAmount", "7")}
+            unit={s("offsetUnit", "Tage")}
+            dir={s("offsetDir", "vor")}
+            onChange={set}
+          />
+        ) : null}
         <div>
           <div className="mb-2 flex items-center gap-2">
             <p className="text-xs font-semibold text-content">Einschränkung</p>
@@ -368,6 +436,35 @@ export function ConfigPanel({
           <Field label="Andere Automation" required hint="Name der Automation, die gestartet wird">
             <Input value={s("workflow")} onChange={(e) => set({ workflow: e.target.value })} placeholder="z. B. Onboarding starten" />
           </Field>
+        ) : step.type === "record.create" ? (
+          <>
+            <Field label="Datensatztyp" required>
+              <Select placeholder="Typ wählen" value={s("recordType")} onChange={(e) => set({ recordType: e.target.value })} options={RECORD_TYPES} />
+            </Field>
+            {s("recordType") === "task" ? (
+              <>
+                <Field label="Aufgabentitel" required><Input value={s("title")} onChange={(e) => set({ title: e.target.value })} placeholder="z. B. Angebot nachfassen" /></Field>
+                <Field label="Fällig"><Select value={s("dueDays", "3")} onChange={(e) => set({ dueDays: e.target.value })} options={DUE} /></Field>
+              </>
+            ) : s("recordType") === "company" ? (
+              <Field label="Firmenname" required><Input value={s("name")} onChange={(e) => set({ name: e.target.value })} placeholder="z. B. Muster GmbH" /></Field>
+            ) : s("recordType") === "contact" ? (
+              <>
+                <Field label="Nachname" required><Input value={s("lastName")} onChange={(e) => set({ lastName: e.target.value })} placeholder="z. B. Müller" /></Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="Vorname"><Input value={s("firstName")} onChange={(e) => set({ firstName: e.target.value })} /></Field>
+                  <Field label="E-Mail"><Input value={s("email")} onChange={(e) => set({ email: e.target.value })} placeholder="name@firma.de" /></Field>
+                </div>
+                <p className="text-2xs text-content-muted">Der Kontakt wird der Firma des auslösenden Datensatzes zugeordnet, sofern vorhanden.</p>
+              </>
+            ) : s("recordType") === "deal" ? (
+              <>
+                <Field label="Deal-Titel" required><Input value={s("title")} onChange={(e) => set({ title: e.target.value })} placeholder="z. B. Verlängerung 2027" /></Field>
+                <Field label="Betrag" hint="Optional"><Input mono align="right" suffix="EUR" value={s("amount")} onChange={(e) => set({ amount: e.target.value })} placeholder="0" /></Field>
+                <p className="text-2xs text-content-muted">Der Deal startet in der ersten Phase der Standard-Pipeline und übernimmt Firma und Kontakt des auslösenden Datensatzes.</p>
+              </>
+            ) : null}
+          </>
         ) : (
           <TokenField label="Text" multiline text={s("text")} tokens={arr("textTokens")} onText={(v) => set({ text: v })} onTokens={(t) => set({ textTokens: t })} />
         )}

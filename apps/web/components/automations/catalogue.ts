@@ -148,6 +148,24 @@ export const FIELDS: Record<string, FieldDef[]> = {
   ],
 };
 
+/** Record kinds the "Datensatz anlegen" action can create, in plain German. */
+export const RECORD_TYPES: { value: string; label: string }[] = [
+  { value: "task", label: "Aufgabe" },
+  { value: "contact", label: "Kontakt" },
+  { value: "company", label: "Firma" },
+  { value: "deal", label: "Deal" },
+];
+
+/**
+ * Date fields a relative trigger ("N Tage vor einem Datum") can fire against.
+ * Only real Deal date columns — the engine maps these back to the schema and
+ * skips anything it cannot resolve.
+ */
+export const RELATIVE_DATE_FIELDS: { value: string; label: string }[] = [
+  { value: "abschluss", label: "Abschlussdatum" },
+  { value: "verlaengerung", label: "Verlängerungsdatum" },
+];
+
 export const OPERATORS: Record<FieldKind, string[]> = {
   money: ["ist größer als", "ist kleiner als", "ist genau", "liegt zwischen"],
   text: ["ist", "ist nicht", "enthält", "ist leer"],
@@ -208,10 +226,12 @@ const REQUIRED_CONFIG: Record<string, string[]> = {
   "wait.duration": ["amount"],
   "deal.move": ["stage"],
   "field.set": ["field", "value"],
+  "record.create": ["recordType"],
   "tag.add": ["tag"],
   assign: ["assignee"],
   webhook: ["url"],
   subflow: ["workflow"],
+  relative: ["field"],
   branch: ["condition"],
   filter: ["field"],
 };
@@ -254,6 +274,18 @@ export function stepSentence(type: string, config: unknown): string {
       return s("stage") ? `Deal in Phase „${s("stage")}“ verschieben` : base;
     case "tag.add":
       return s("tag") ? `Tag „${s("tag")}“ hinzufügen` : base;
+    case "record.create": {
+      const rt = RECORD_TYPES.find((r) => r.value === s("recordType"));
+      return rt ? `${rt.label} anlegen` : base;
+    }
+    case "relative": {
+      const df = RELATIVE_DATE_FIELDS.find((d) => d.value === s("field"));
+      const days = Number(s("offsetDays"));
+      if (!df || !Number.isFinite(days)) return base;
+      const n = Math.abs(days);
+      const when = days <= 0 ? "vor" : "nach";
+      return `${n} ${n === 1 ? "Tag" : "Tage"} ${when} dem ${df.label}`;
+    }
     case "branch": {
       const cond = c.condition as FilterClause | undefined;
       return cond && present(cond.field) ? `Wenn ${filterText(cond)}` : base;

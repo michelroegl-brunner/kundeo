@@ -115,12 +115,13 @@ export async function runDueSchedules(now: Date = new Date()): Promise<number> {
 const RELATIVE_HOUR = 8; // relative-date sweeps run once a day, from 08:00
 
 /** Map a relative trigger's date field to a real Deal column, or null if none. */
-function mapDealDateColumn(field: string | undefined): "expectedCloseAt" | null {
+function mapDealDateColumn(field: string | undefined): "expectedCloseAt" | "renewalAt" | null {
   if (!field) return null;
   const f = field.toLowerCase();
-  // Only the deal close date exists today. Renewal/other dates aren't in the
-  // schema yet, so a trigger on them does not fire (rather than fire wrongly).
+  // Two real date columns exist on Deal: the close date and the renewal date.
+  // A trigger on any other date does not fire (rather than fire wrongly).
   if (f.includes("abschluss") || f.includes("close")) return "expectedCloseAt";
+  if (f.includes("verläng") || f.includes("verlaeng") || f.includes("renew")) return "renewalAt";
   return null;
 }
 
@@ -160,14 +161,26 @@ export async function runDueRelative(now: Date = new Date()): Promise<number> {
     const targetEnd = new Date(target);
     targetEnd.setDate(targetEnd.getDate() + 1);
 
+    // Pre-filter by the trigger's own conditions (its "Einschränkung", stored on
+    // the trigger config) so a relative trigger fans out only to deals that also
+    // match — no skipped-run noise in the Protokoll.
+    const rawFilters = (trigger.config as { filters?: FilterClause[] } | null)?.filters;
+    const filters = (Array.isArray(rawFilters) ? rawFilters : []).filter((c) => c && c.field);
     const where = { [column]: { gte: target, lt: targetEnd } } as Prisma.DealWhereInput;
-    const ids = await withOrg(wf.organizationId, async (tx) =>
-      (await tx.deal.findMany({ where, select: { id: true }, take: FANOUT_CAP })).map((r) => r.id),
-    );
-    for (const id of ids) {
+    const passing = await withOrg(wf.organizationId, async (tx) => {
+      const ids = (await tx.deal.findMany({ where, select: { id: true }, take: FANOUT_CAP })).map((r) => r.id);
+      if (!filters.length) return ids;
+      const out: string[] = [];
+      for (const id of ids) {
+        const loaded = await loadRecord(tx, "Deal", id);
+        if (loaded && evaluateAll(filters, loaded)) out.push(id);
+      }
+      return out;
+    });
+    for (const id of passing) {
       await startRun({ organizationId: wf.organizationId, workflowId: wf.id, recordType: "Deal", recordId: id });
     }
-    started += ids.length;
+    started += passing.length;
   }
   return started;
 }
