@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { scoped } from "@/lib/session";
+import { emitEvent } from "@/lib/automations/events";
 
 function clean(v: FormDataEntryValue | null): string | null {
   const s = typeof v === "string" ? v.trim() : "";
@@ -25,9 +26,10 @@ function contactInput(formData: FormData) {
 
 export async function createContact(formData: FormData) {
   const input = contactInput(formData);
-  await scoped((db, organizationId) =>
+  const contact = await scoped((db, organizationId) =>
     db.contact.create({ data: { ...input, organizationId } }),
   );
+  await emitEvent("contact.created", { type: "Contact", id: contact.id });
   revalidatePath("/contacts");
   redirect("/contacts");
 }
@@ -35,6 +37,7 @@ export async function createContact(formData: FormData) {
 export async function updateContact(id: string, formData: FormData) {
   const input = contactInput(formData);
   await scoped((db) => db.contact.update({ where: { id }, data: input }));
+  await emitEvent("contact.updated", { type: "Contact", id });
   revalidatePath("/contacts");
   revalidatePath(`/contacts/${id}`);
   redirect("/contacts");

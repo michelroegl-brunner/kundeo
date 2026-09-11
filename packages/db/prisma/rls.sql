@@ -22,7 +22,8 @@ DO $$
 DECLARE
   t text;
   tenant_tables text[] := ARRAY[
-    'company', 'contact', 'pipeline', 'deal', 'activity', 'tag'
+    'company', 'contact', 'pipeline', 'deal', 'activity', 'tag',
+    'workflow', 'workflow_run'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP
@@ -51,3 +52,17 @@ CREATE POLICY tenant_isolation ON "contact_tag"
   USING (EXISTS (SELECT 1 FROM "contact" c
                  WHERE c.id = "contact_tag"."contactId"
                    AND c."organizationId" = app_current_org_id()));
+
+ALTER TABLE "workflow_step" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON "workflow_step";
+CREATE POLICY tenant_isolation ON "workflow_step"
+  USING (EXISTS (SELECT 1 FROM "workflow" w
+                 WHERE w.id = "workflow_step"."workflowId"
+                   AND w."organizationId" = app_current_org_id()));
+
+ALTER TABLE "workflow_run_step" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON "workflow_run_step";
+CREATE POLICY tenant_isolation ON "workflow_run_step"
+  USING (EXISTS (SELECT 1 FROM "workflow_run" r
+                 WHERE r.id = "workflow_run_step"."runId"
+                   AND r."organizationId" = app_current_org_id()));

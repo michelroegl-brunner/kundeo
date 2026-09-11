@@ -25,6 +25,8 @@ const NAV: (SidebarNavItem & { href?: string })[] = [
   { id: "contacts", label: "Kontakte", icon: "users", href: "/contacts" },
   { id: "companies", label: "Firmen", icon: "building-2", href: "/companies" },
   { id: "activities", label: "Aktivitäten", icon: "activity", href: "/activities" },
+  { section: "Automatisierung" },
+  { id: "automations", label: "Automationen", icon: "workflow", href: "/automationen" },
   { section: "Organisation" },
   { id: "team", label: "Team", icon: "user-cog", href: "/team" },
   { id: "settings", label: "Einstellungen", icon: "settings", href: "/settings" },
@@ -40,6 +42,7 @@ const DEFAULT_TITLES: Record<string, string> = {
   contacts: "Kontakte",
   companies: "Firmen",
   activities: "Aktivitäten",
+  automations: "Automationen",
   team: "Team",
   settings: "Einstellungen",
 };
@@ -49,6 +52,7 @@ function activeIdFor(pathname: string): string {
   if (pathname.startsWith("/contacts")) return "contacts";
   if (pathname.startsWith("/companies")) return "companies";
   if (pathname.startsWith("/activities")) return "activities";
+  if (pathname.startsWith("/automationen")) return "automations";
   if (pathname.startsWith("/team")) return "team";
   if (pathname.startsWith("/settings")) return "settings";
   return "dashboard";

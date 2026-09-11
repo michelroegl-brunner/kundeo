@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { scoped } from "@/lib/session";
+import { emitEvent } from "@/lib/automations/events";
 
 /**
  * Moves a deal into another stage of its pipeline. Runs tenant-scoped (RLS), so
@@ -9,10 +10,12 @@ import { scoped } from "@/lib/session";
  * an out-of-org stageId resolves to null and is rejected.
  */
 export async function moveDeal(dealId: string, stageId: string): Promise<void> {
-  await scoped(async (db) => {
-    const stage = await db.stage.findFirst({ where: { id: stageId }, select: { id: true } });
+  const stageName = await scoped(async (db) => {
+    const stage = await db.stage.findFirst({ where: { id: stageId }, select: { id: true, name: true } });
     if (!stage) throw new Error("Unbekannte Phase");
     await db.deal.update({ where: { id: dealId }, data: { stageId } });
+    return stage.name;
   });
+  await emitEvent("deal.stage", { type: "Deal", id: dealId }, { stage: stageName });
   revalidatePath("/deals");
 }

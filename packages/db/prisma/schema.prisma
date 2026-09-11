@@ -108,6 +108,10 @@ model Organization {
   activities Activity[]
   tags       Tag[]
 
+  // tenant-scoped automations
+  workflows    Workflow[]
+  workflowRuns WorkflowRun[]
+
   @@map("organization")
 }
 
@@ -322,4 +326,126 @@ model ContactTag {
 
   @@id([contactId, tagId])
   @@map("contact_tag")
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Automations — user-authored workflows (tenant-scoped by organizationId)
+//
+// A Workflow owns an ordered tree of WorkflowSteps. TRIGGER / ACTION / DELAY /
+// FILTER steps sit on the main path (parentStepId = null). A BRANCH step's
+// children carry parentStepId + branchPath (YES | NO) — that parent/child shape
+// is exactly what lets the builder render its two-lane canvas. Each execution
+// is a WorkflowRun with one WorkflowRunStep per step it touched: the run log.
+// ───────────────────────────────────────────────────────────────────────────
+
+model Workflow {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  isActive       Boolean  @default(false)
+  version        Int      @default(1)
+  createdBy      String // User.id of the author
+  updatedAt      DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  steps        WorkflowStep[]
+  runs         WorkflowRun[]
+
+  @@index([organizationId])
+  @@map("workflow")
+}
+
+model WorkflowStep {
+  id           String           @id @default(cuid())
+  workflowId   String
+  kind         WorkflowStepKind
+  type         String // catalogue key, e.g. "deal.won", "task.create"
+  order        Int
+  parentStepId String? // null = main path; set = inside a branch lane
+  branchPath   BranchPath? // null on the main path; YES | NO inside a branch
+  config       Json             @default("{}")
+
+  workflow Workflow       @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  parent   WorkflowStep?  @relation("BranchChildren", fields: [parentStepId], references: [id], onDelete: Cascade)
+  children WorkflowStep[] @relation("BranchChildren")
+
+  @@index([workflowId])
+  @@index([workflowId, parentStepId, order])
+  @@map("workflow_step")
+}
+
+enum WorkflowStepKind {
+  TRIGGER
+  ACTION
+  DELAY
+  BRANCH
+  FILTER
+}
+
+enum BranchPath {
+  YES
+  NO
+}
+
+model WorkflowRun {
+  id                String            @id @default(cuid())
+  organizationId    String
+  workflowId        String
+  startedAt         DateTime          @default(now())
+  finishedAt        DateTime?
+  status            WorkflowRunStatus
+  triggeredByUserId String? // null = system-triggered (schedule / relative date)
+  recordType        String? // e.g. "Deal", "Contact"
+  recordId          String?
+  durationMs        Int?
+  // Set only while status = WAITING: when a DELAY step suspends a run, the
+  // engine records when to wake it and which step to resume at. resumeStepId
+  // is a soft reference (no FK), consistent with WorkflowRunStep.stepId.
+  resumeAt          DateTime?
+  resumeStepId      String?
+
+  organization Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  workflow     Workflow          @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  steps        WorkflowRunStep[]
+
+  @@index([organizationId])
+  @@index([organizationId, workflowId])
+  @@index([workflowId, startedAt])
+  // The ticker sweeps for due suspended runs: WAITING with resumeAt <= now.
+  @@index([status, resumeAt])
+  @@map("workflow_run")
+}
+
+// One row per step a run touched. stepId is a soft reference (no FK): run
+// history must survive later edits or deletion of the workflow's steps.
+model WorkflowRunStep {
+  id         String                @id @default(cuid())
+  runId      String
+  stepId     String
+  order      Int
+  status     WorkflowRunStepStatus
+  startedAt  DateTime              @default(now())
+  durationMs Int?
+  message    String?
+  errorCode  String?
+
+  run WorkflowRun @relation(fields: [runId], references: [id], onDelete: Cascade)
+
+  @@index([runId])
+  @@map("workflow_run_step")
+}
+
+enum WorkflowRunStatus {
+  OK
+  ERROR
+  SKIPPED
+  TEST
+  RUNNING // in flight; a crashed process leaves runs here for recovery
+  WAITING // suspended on a DELAY step until resumeAt
+}
+
+enum WorkflowRunStepStatus {
+  OK
+  ERROR
+  SKIPPED
 }
