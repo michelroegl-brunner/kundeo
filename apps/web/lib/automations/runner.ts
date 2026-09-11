@@ -14,11 +14,17 @@
  */
 import { withOrg, type Prisma } from "@kundeo/db";
 import { buildTree, type FlowStep, type FlatStep, type FilterClause } from "@/components/automations/catalogue";
+import { getEmailSender } from "@/lib/email";
 import { loadRecord, evaluateClause, evaluateAll, type LoadedRecord, type RecordType } from "./records";
-import { executeAction } from "./actions-exec";
+import { executeAction, type PendingSideEffect } from "./actions-exec";
 
 type Tx = Prisma.TransactionClient;
 type Signal = "continue" | "stop" | "suspend" | "error";
+
+/** A queued side-effect plus the run-step row to update once it has been sent. */
+interface OutboxItem extends PendingSideEffect {
+  stepRowId: string;
+}
 
 interface WalkState {
   tx: Tx;
@@ -29,6 +35,7 @@ interface WalkState {
   resumeStepId: string | null;
   order: number;
   suspend: { stepId: string; resumeAt: Date } | null;
+  outbox: OutboxItem[];
 }
 
 const UNIT_MS: Record<string, number> = {
@@ -62,8 +69,8 @@ async function logStep(
   status: "OK" | "ERROR" | "SKIPPED",
   message: string,
   errorCode?: string,
-) {
-  await state.tx.workflowRunStep.create({
+): Promise<string> {
+  const row = await state.tx.workflowRunStep.create({
     data: {
       runId: state.runId,
       stepId: step.id,
@@ -72,7 +79,9 @@ async function logStep(
       message,
       errorCode: errorCode ?? null,
     },
+    select: { id: true },
   });
+  return row.id;
 }
 
 async function walkLane(state: WalkState, steps: FlowStep[]): Promise<Signal> {
@@ -127,7 +136,8 @@ async function walkLane(state: WalkState, steps: FlowStep[]): Promise<Signal> {
           loaded: state.loaded,
           config: step.config,
         });
-        await logStep(state, step, outcome.status, outcome.message, outcome.errorCode);
+        const stepRowId = await logStep(state, step, outcome.status, outcome.message, outcome.errorCode);
+        if (outcome.sideEffect) state.outbox.push({ ...outcome.sideEffect, stepRowId });
         if (outcome.status === "ERROR") return "error";
         break;
       }
@@ -177,6 +187,65 @@ async function finalize(state: WalkState, startedAt: number, signal: Signal) {
   });
 }
 
+function errText(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+async function callWebhook(url: string, payload: Record<string, unknown>): Promise<string> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 10_000);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    return `Webhook aufgerufen (HTTP ${res.status})`;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Send the run's queued side-effects after its transaction has committed, then
+ * update each step to the transport's real outcome. A failed send marks its step
+ * ERROR and downgrades a still-OK run to ERROR — the run log stays truthful.
+ */
+async function flushOutbox(organizationId: string, runId: string, outbox: OutboxItem[]): Promise<void> {
+  if (!outbox.length) return;
+  let anyError = false;
+  for (const item of outbox) {
+    try {
+      let detail: string;
+      if (item.kind === "email" && item.email) {
+        detail = (await getEmailSender().send(item.email)).detail;
+      } else if (item.kind === "webhook" && item.webhook) {
+        detail = await callWebhook(item.webhook.url, item.webhook.payload);
+      } else {
+        continue;
+      }
+      await withOrg(organizationId, (tx) =>
+        tx.workflowRunStep.update({ where: { id: item.stepRowId }, data: { message: detail } }),
+      );
+    } catch (err) {
+      anyError = true;
+      await withOrg(organizationId, (tx) =>
+        tx.workflowRunStep.update({
+          where: { id: item.stepRowId },
+          data: { status: "ERROR", message: `Versand fehlgeschlagen: ${errText(err)}`, errorCode: "SEND_FAILED" },
+        }),
+      );
+    }
+  }
+  if (anyError) {
+    await withOrg(organizationId, (tx) =>
+      tx.workflowRun.updateMany({ where: { id: runId, status: "OK" }, data: { status: "ERROR" } }),
+    );
+  }
+}
+
 export interface StartRunParams {
   organizationId: string;
   workflowId: string;
@@ -188,6 +257,8 @@ export interface StartRunParams {
 /** Create and drive a fresh run for a matched trigger. */
 export async function startRun(params: StartRunParams): Promise<void> {
   const startedAt = Date.now();
+  const outbox: OutboxItem[] = [];
+  const ref = { runId: "" };
   await withOrg(params.organizationId, async (tx) => {
     const rows = await tx.workflowStep.findMany({ where: { workflowId: params.workflowId }, orderBy: { order: "asc" } });
     if (!rows.length) return;
@@ -206,6 +277,7 @@ export async function startRun(params: StartRunParams): Promise<void> {
         triggeredByUserId: params.triggeredByUserId ?? null,
       },
     });
+    ref.runId = run.id;
     const state: WalkState = {
       tx,
       organizationId: params.organizationId,
@@ -215,15 +287,18 @@ export async function startRun(params: StartRunParams): Promise<void> {
       resumeStepId: null,
       order: 0,
       suspend: null,
+      outbox,
     };
     const signal = await walkLane(state, tree);
     await finalize(state, startedAt, signal);
   });
+  await flushOutbox(params.organizationId, ref.runId, outbox);
 }
 
 /** Continue a suspended run whose delay has elapsed. */
 export async function resumeRun(organizationId: string, runId: string): Promise<void> {
   const startedAt = Date.now();
+  const outbox: OutboxItem[] = [];
   await withOrg(organizationId, async (tx) => {
     // Atomically claim the run: only one worker can move it WAITING → RUNNING.
     const claimed = await tx.workflowRun.updateMany({ where: { id: runId, status: "WAITING" }, data: { status: "RUNNING" } });
@@ -254,8 +329,10 @@ export async function resumeRun(organizationId: string, runId: string): Promise<
       resumeStepId: run.resumeStepId,
       order: existing,
       suspend: null,
+      outbox,
     };
     const signal = await walkLane(state, tree);
     await finalize(state, startedAt, signal);
   });
+  await flushOutbox(organizationId, runId, outbox);
 }

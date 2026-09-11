@@ -13,7 +13,7 @@ import type { Prisma } from "@kundeo/db";
 import { FIELDS, type FilterClause, type FieldKind } from "@/components/automations/catalogue";
 
 /** English record type as stored on WorkflowRun.recordType. */
-export type RecordType = "Deal" | "Contact" | "Company";
+export type RecordType = "Deal" | "Contact" | "Company" | "Task";
 
 type Tx = Prisma.TransactionClient;
 
@@ -38,6 +38,15 @@ export async function loadRecord(
     const data = await tx.contact.findFirst({ where: { id }, include: { company: true } });
     return data ? { type, data } : null;
   }
+  if (type === "Task") {
+    // A Task is an Activity(type=TASK). Load the contact/deal it hangs off so
+    // conditions and actions can reach through to those records.
+    const data = await tx.activity.findFirst({
+      where: { id, type: "TASK" },
+      include: { contact: { include: { company: true } }, deal: { include: { stage: true, company: true, contact: true } } },
+    });
+    return data ? { type, data } : null;
+  }
   const data = await tx.company.findFirst({ where: { id } });
   return data ? { type, data } : null;
 }
@@ -45,7 +54,9 @@ export async function loadRecord(
 const GERMAN_TO_TYPE: Record<string, RecordType> = { Deal: "Deal", Firma: "Company", Kontakt: "Contact" };
 
 function defaultEntity(type: RecordType): string {
-  return type === "Deal" ? "Deal" : type === "Company" ? "Firma" : "Kontakt";
+  if (type === "Deal") return "Deal";
+  if (type === "Company") return "Firma";
+  return "Kontakt"; // Contact and Task both default to contact-scoped conditions
 }
 
 /** Resolve the object a German entity name refers to, following relations. */
@@ -57,6 +68,9 @@ function entityObject(loaded: LoadedRecord, entity: string): Record<string, unkn
   if (loaded.type === "Deal" && target === "Company") return loaded.data.company ?? null;
   if (loaded.type === "Deal" && target === "Contact") return loaded.data.contact ?? null;
   if (loaded.type === "Contact" && target === "Company") return loaded.data.company ?? null;
+  if (loaded.type === "Task" && target === "Contact") return loaded.data.contact ?? null;
+  if (loaded.type === "Task" && target === "Deal") return loaded.data.deal ?? null;
+  if (loaded.type === "Task" && target === "Company") return loaded.data.contact?.company ?? loaded.data.deal?.company ?? null;
   return null;
 }
 
@@ -67,10 +81,8 @@ function fieldValue(obj: Record<string, unknown>, entity: string, field: string)
     if (field === "stage") return (obj.stage as { name?: string } | null)?.name ?? null;
     if (field === "owner") return obj.ownerId ?? null;
   }
-  // Kontakt.consent has no backing column yet — DSGVO-safe: treated as "not
-  // recorded" so "liegt nicht vor" is true and "liegt vor" is false. A future
-  // consent field (email-templates work) flips this in one place.
-  if (entity === "Kontakt" && field === "consent") return false;
+  // Kontakt.consent maps to the recorded email-consent flag (DSGVO).
+  if (entity === "Kontakt" && field === "consent") return obj.emailConsent === true;
   return obj[field] ?? null;
 }
 
@@ -137,4 +149,9 @@ export function evaluateClause(clause: FilterClause, loaded: LoadedRecord): bool
 /** All clauses must pass (used for trigger `filters` and FILTER steps). */
 export function evaluateAll(clauses: FilterClause[], loaded: LoadedRecord): boolean {
   return clauses.every((c) => evaluateClause(c, loaded));
+}
+
+/** DSGVO gate: has this contact recorded email consent? */
+export function contactEmailConsent(contact: { emailConsent?: boolean } | null | undefined): boolean {
+  return contact?.emailConsent === true;
 }

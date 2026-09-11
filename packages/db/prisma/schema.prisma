@@ -190,6 +190,10 @@ model Contact {
   companyId      String?
   ownerId        String? // User.id of the responsible sales rep
   notes          String?
+  // DSGVO: automations may only email a contact who has given consent. Default
+  // false — no consent is assumed until it is recorded (with the timestamp).
+  emailConsent   Boolean   @default(false)
+  emailConsentAt DateTime?
   createdAt      DateTime @default(now())
   updatedAt      DateTime @updatedAt
 

@@ -11,17 +11,30 @@
  * — truthful, and the safe default until consent is captured.
  */
 import type { Prisma } from "@kundeo/db";
-import { getEmailSender } from "@/lib/email";
+import type { EmailMessage } from "@/lib/email";
 import type { LoadedRecord } from "./records";
+import { contactEmailConsent } from "./records";
 
 type Tx = Prisma.TransactionClient;
 
 export type StepStatus = "OK" | "ERROR" | "SKIPPED";
 
+/**
+ * A network side-effect an action defers to the post-commit outbox: the DB work
+ * happens in the run transaction, the send happens after it commits.
+ */
+export interface PendingSideEffect {
+  kind: "email" | "webhook";
+  email?: EmailMessage;
+  webhook?: { url: string; payload: Record<string, unknown> };
+}
+
 export interface ActionOutcome {
   status: StepStatus;
   message: string;
   errorCode?: string;
+  /** When present, the runner enqueues this to send after the run commits. */
+  sideEffect?: PendingSideEffect;
 }
 
 interface ActionContext {
@@ -38,12 +51,20 @@ const str = (v: unknown): string | undefined => {
 
 function dealId(loaded: LoadedRecord): string | null {
   if (loaded.type === "Deal") return loaded.data.id;
+  if (loaded.type === "Task") return loaded.data.dealId ?? null;
   return null;
 }
 
 function contactId(loaded: LoadedRecord): string | null {
   if (loaded.type === "Contact") return loaded.data.id;
-  if (loaded.type === "Deal") return loaded.data.contactId ?? null;
+  if (loaded.type === "Deal" || loaded.type === "Task") return loaded.data.contactId ?? null;
+  return null;
+}
+
+/** The contact an email would go to: the record itself, or its deal's/task's contact. */
+function recipientContact(loaded: LoadedRecord): { email?: string | null; emailConsent?: boolean } | null {
+  if (loaded.type === "Contact") return loaded.data;
+  if (loaded.type === "Deal" || loaded.type === "Task") return loaded.data.contact ?? null;
   return null;
 }
 
@@ -87,34 +108,46 @@ async function sendEmail(ctx: ActionContext): Promise<ActionOutcome> {
   const template = str(ctx.config.template);
   if (!template) return { status: "SKIPPED", message: "Keine E-Mail-Vorlage gewählt" };
 
-  // Resolve the recipient contact (the record itself, or the deal's contact).
-  const contact =
-    ctx.loaded.type === "Contact"
-      ? ctx.loaded.data
-      : ctx.loaded.type === "Deal"
-        ? ctx.loaded.data.contact
-        : null;
+  const contact = recipientContact(ctx.loaded);
   if (!contact) return { status: "SKIPPED", message: "Kein Kontakt für den Versand" };
   const to = str(contact.email);
   if (!to) return { status: "SKIPPED", message: "Kontakt hat keine E-Mail-Adresse" };
 
-  // DSGVO consent gate. No consent column exists yet → treated as not recorded.
-  const hasConsent = false;
-  if (!hasConsent) {
+  // DSGVO consent gate: only email a contact who has recorded consent.
+  if (!contactEmailConsent(contact)) {
     return {
       status: "SKIPPED",
       message: "Einwilligung wird geprüft – keine dokumentierte Einwilligung, nicht gesendet",
     };
   }
 
-  const result = await getEmailSender().send({
+  // The actual send is deferred to the post-commit outbox (no network in the
+  // run transaction). The step is provisionally OK; the runner updates it with
+  // the transport's result, or to ERROR if delivery fails.
+  return {
+    status: "OK",
+    message: `E-Mail „${template}“ an ${to} – wird gesendet`,
+    sideEffect: {
+      kind: "email",
+      email: { organizationId: ctx.organizationId, to, subject: template, text: `Vorlage: ${template}`, templateName: template },
+    },
+  };
+}
+
+async function callWebhookAction(ctx: ActionContext): Promise<ActionOutcome> {
+  const url = str(ctx.config.url);
+  if (!url) return { status: "SKIPPED", message: "Keine Webhook-URL gesetzt" };
+  if (!/^https?:\/\//i.test(url)) return { status: "ERROR", message: "Ungültige Webhook-URL", errorCode: "BAD_URL" };
+  const payload: Record<string, unknown> = {
+    type: ctx.loaded.type,
+    id: ctx.loaded.data.id,
     organizationId: ctx.organizationId,
-    to,
-    subject: template,
-    text: `Vorlage: ${template}`,
-    templateName: template,
-  });
-  return { status: "OK", message: result.detail };
+  };
+  return {
+    status: "OK",
+    message: `Webhook ${url} – wird aufgerufen`,
+    sideEffect: { kind: "webhook", webhook: { url, payload } },
+  };
 }
 
 async function moveDeal(ctx: ActionContext): Promise<ActionOutcome> {
@@ -173,7 +206,6 @@ async function notify(ctx: ActionContext): Promise<ActionOutcome> {
 const NOT_YET: Record<string, string> = {
   "field.set": "Feld setzen wird noch nicht ausgeführt",
   "record.create": "Datensatz anlegen wird noch nicht ausgeführt",
-  webhook: "Webhook wird noch nicht ausgeführt (Bestätigung erforderlich)",
   subflow: "Andere Automation starten wird noch nicht ausgeführt",
 };
 
@@ -187,6 +219,7 @@ const EXECUTORS: Record<string, Executor> = {
   "tag.add": addTag,
   assign,
   notify,
+  webhook: callWebhookAction,
 };
 
 /** Run one ACTION step's executor, or skip with a truthful reason. */

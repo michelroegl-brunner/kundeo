@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { scoped } from "@/lib/session";
+import { emitEvent } from "@/lib/automations/events";
 
 /** Marks a task complete (sets completedAt) or reopens it. Tenant-scoped (RLS). */
 export async function setTaskDone(id: string, done: boolean): Promise<void> {
@@ -10,5 +11,6 @@ export async function setTaskDone(id: string, done: boolean): Promise<void> {
     if (!task) throw new Error("Aufgabe nicht gefunden");
     await db.activity.update({ where: { id }, data: { completedAt: done ? new Date() : null } });
   });
+  if (done) await emitEvent("task.completed", { type: "Task", id });
   revalidatePath("/activities");
 }

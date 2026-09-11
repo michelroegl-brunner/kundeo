@@ -9,14 +9,14 @@
  * connection — a system-level operation by design — then resumes each run inside
  * its own org via withOrg, where RLS applies again.
  *
- * Not yet swept here: schedule/relative triggers. Those fire over *sets* of
- * records (all inactive contacts, all companies without a USt-IdNr.) and need a
- * record-set execution model the action executors don't have yet — a deliberate
- * next increment, not faked.
+ * Each tick also fires due schedule-triggered workflows (see ./schedules).
+ * Relative-date triggers remain unhandled — they need date fields the schema
+ * does not have yet.
  */
 import "server-only";
 import { prisma } from "@kundeo/db";
 import { resumeRun } from "./runner";
+import { runDueSchedules } from "./schedules";
 
 const TICK_MS = 60_000;
 const FIRST_TICK_MS = 10_000;
@@ -54,6 +54,7 @@ export function startTicker(): void {
 
   const tick = () => {
     void drainDueRuns().catch((err) => console.error("[automations] ticker error", err));
+    void runDueSchedules().catch((err) => console.error("[automations] schedule error", err));
   };
   const interval = setInterval(tick, TICK_MS);
   if (typeof interval.unref === "function") interval.unref();
