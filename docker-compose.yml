@@ -8,10 +8,13 @@ services:
       POSTGRES_USER: kundeo
       POSTGRES_PASSWORD: kundeo
       POSTGRES_DB: kundeo
+    # Host port 5434 (localhost only) to avoid clashing with other local
+    # Postgres instances (e.g. a default one on 5432).
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5434:5432"
     volumes:
       - kundeo_pgdata:/var/lib/postgresql/data
+      - ./deploy/postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U kundeo"]
       interval: 5s

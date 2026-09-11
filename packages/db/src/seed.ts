@@ -1,4 +1,10 @@
-import { prisma } from "./index";
+import { PrismaClient } from "../generated/client/index.js";
+
+// Seed connects as the owning role (DIRECT_URL) so it bypasses RLS and can
+// create data across organizations. Never use the app role here.
+const prisma = new PrismaClient({
+  datasourceUrl: process.env.DIRECT_URL ?? process.env.DATABASE_URL,
+});
 
 /**
  * Development seed: one demo organization with a default pipeline, a couple of

@@ -46,6 +46,20 @@ At the same time we **never design ourselves into a corner** for hosting:
   client from a request handler.
 - Self-host = one organization; hosted = many orgs per database.
 
+## Distribution / packaging
+
+Self-host must be easy in more than one way — don't couple the product to Docker:
+
+- **Docker** — app image (GHCR) + production compose (app + Postgres).
+- **Native Linux** — run the Next.js `standalone` build directly on Node with a
+  systemd unit; ship a prebuilt release tarball so there's no build step on the
+  server.
+- **Prebuilds via GitHub Actions** — on tag/release, build and publish the
+  Docker image and the native tarball as release artifacts.
+
+Keep runtime config env-based and migrations runnable on start so every
+distribution path shares one setup flow.
+
 ## Conventions
 
 - Money is stored as integer minor units (`amountCents`), never floats.
