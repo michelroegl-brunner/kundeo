@@ -29,13 +29,13 @@ if (process.env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
  */
 export async function withOrg<T>(
   organizationId: string,
-  fn: (tx: Prisma.TransactionClient) => Promise<T>,
+  fn: (tx: Prisma.TransactionClient, organizationId: string) => Promise<T>,
 ): Promise<T> {
   return prisma.$transaction(async (tx) => {
     await tx.$executeRawUnsafe(
       `SELECT set_config('app.current_org_id', $1, true)`,
       organizationId,
     );
-    return fn(tx);
+    return fn(tx, organizationId);
   });
 }

@@ -1,25 +1,393 @@
 @import "tailwindcss";
-@import "./brand-tokens.css";
 
-/* Map the Kundeo brand tokens onto Tailwind utilities (bg-brand, text-amber, …). */
-@theme {
-  --color-brand: var(--kundeo-indigo);
-  --color-brand-hover: var(--kundeo-indigo-600);
-  --color-brand-soft: var(--kundeo-indigo-100);
-  --color-ink: var(--kundeo-ink);
-  --color-amber: var(--kundeo-amber);
-  --color-amber-soft: var(--kundeo-amber-100);
-  --color-success: var(--kundeo-green);
-  --color-success-soft: var(--kundeo-green-100);
-  --color-cloud: var(--kundeo-cloud);
-  --color-slate-muted: var(--kundeo-slate);
-}
+/* Dark theme is driven by [data-theme="dark"] (see readme "Dark theme"),
+   not prefers-color-scheme — point Tailwind's `dark:` variant at it too. */
+@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 
+/* ============================================================================
+   Kundeo design tokens
+   Ported verbatim from .claude/skills/kundeo-design/tokens/*.css — exact values,
+   nothing rounded or snapped. The base palette and scales are static; the
+   semantic aliases below them are redefined under [data-theme="dark"], and the
+   @theme inline block at the end exposes every token as a Tailwind utility.
+   ============================================================================ */
 :root {
-  color-scheme: light dark;
+  /* --- Base palette (tokens/colors.css) ------------------------------------ */
+  /* Core six — verbatim from kundeo/kundeo-tokens.css */
+  --kundeo-indigo: #6c63ff;
+  --kundeo-ink: #12132a;
+  --kundeo-amber: #ffb020;
+  --kundeo-green: #22c08c;
+  --kundeo-cloud: #f6f7fb;
+  --kundeo-slate: #6b7280;
+
+  /* Derived steps — from source */
+  --kundeo-indigo-600: #5a50f0;
+  --kundeo-indigo-100: #e9e7ff;
+  --kundeo-amber-100: #fff1d6;
+  --kundeo-green-100: #d7f5eb;
+
+  /* Indigo ramp (extension) */
+  --indigo-50: #f4f3ff;
+  --indigo-100: var(--kundeo-indigo-100);
+  --indigo-200: #cfcbff;
+  --indigo-300: #b0aaff;
+  --indigo-400: #8b83ff;
+  --indigo-500: var(--kundeo-indigo);
+  --indigo-600: var(--kundeo-indigo-600);
+  --indigo-700: #4a40d6;
+  --indigo-800: #3a32a8;
+  --indigo-900: #262073;
+
+  /* Neutral ramp (extension) — anchored on cloud, slate, ink */
+  --neutral-0: #ffffff;
+  --neutral-25: #fbfbfd;
+  --neutral-50: var(--kundeo-cloud);
+  --neutral-100: #edeef4;
+  --neutral-200: #e1e3ec;
+  --neutral-300: #cbcedb;
+  --neutral-400: #9aa0b4;
+  --neutral-500: var(--kundeo-slate);
+  --neutral-600: #4e5567;
+  --neutral-700: #373d4e;
+  --neutral-800: #23273a;
+  --neutral-900: var(--kundeo-ink);
+  --neutral-950: #0b0c1b;
+
+  /* Status hues */
+  --green-500: var(--kundeo-green);
+  --green-600: #17a277;
+  --green-100: var(--kundeo-green-100);
+  --amber-500: var(--kundeo-amber);
+  --amber-600: #e08c00;
+  --amber-100: var(--kundeo-amber-100);
+  --red-500: #e5484d; /* extension: no loss/error hue in source */
+  --red-600: #cc3339;
+  --red-100: #fde7e8;
+
+  /* --- Semantic aliases (tokens/semantic.css) ------------------------------ */
+  /* Surfaces */
+  --surface-page: var(--neutral-50);
+  --surface-card: var(--neutral-0);
+  --surface-raised: var(--neutral-0);
+  --surface-sunken: var(--neutral-100);
+  --surface-hover: var(--neutral-50);
+  --surface-active: var(--neutral-100);
+  --surface-inverse: var(--neutral-900);
+  --surface-brand: var(--kundeo-indigo);
+  --surface-brand-subtle: var(--indigo-100);
+  --surface-success-subtle: var(--green-100);
+  --surface-warning-subtle: var(--amber-100);
+  --surface-danger-subtle: var(--red-100);
+  --surface-overlay: rgba(18, 19, 42, 0.48);
+
+  /* Text */
+  --text-primary: var(--neutral-900);
+  --text-secondary: var(--neutral-600);
+  --text-muted: var(--neutral-500);
+  --text-subtle: var(--neutral-400);
+  --text-inverse: var(--neutral-0);
+  --text-on-brand: var(--neutral-0);
+  --text-brand: var(--indigo-600);
+  --text-link: var(--indigo-600);
+  --text-link-hover: var(--indigo-700);
+  --text-success: var(--green-600);
+  --text-warning: var(--amber-600);
+  --text-danger: var(--red-600);
+
+  /* Borders */
+  --border-subtle: var(--neutral-100);
+  --border-default: var(--neutral-200);
+  --border-strong: var(--neutral-300);
+  --border-brand: var(--kundeo-indigo);
+  --border-danger: var(--red-500);
+  --border-focus: var(--kundeo-indigo);
+
+  /* Interactive — brand */
+  --brand-rest: var(--kundeo-indigo);
+  --brand-hover: var(--kundeo-indigo-600);
+  --brand-active: var(--indigo-700);
+
+  /* Pipeline / deal status */
+  --status-open: var(--kundeo-indigo);
+  --status-won: var(--kundeo-green);
+  --status-lost: var(--red-500);
+  --status-idle: var(--neutral-400);
+
+  /* Focus */
+  --focus-ring: var(--ring-brand);
+  --focus-offset: 2px;
+
+  /* --- Typography (tokens/typography.css) ---------------------------------- */
+  --text-3xl: 2.5rem; /* 40px — marketing hero */
+  --text-2xl: 1.875rem; /* 30px — page title */
+  --text-xl: 1.5rem; /* 24px — section title */
+  --text-lg: 1.125rem; /* 18px — lead paragraph, card title */
+  --text-md: 1rem; /* 16px — body default */
+  --text-sm: 0.875rem; /* 14px — UI default (tables, forms, nav) */
+  --text-xs: 0.8125rem; /* 13px — meta, helper text */
+  --text-2xs: 0.6875rem; /* 11px — uppercase labels, column heads */
+
+  --leading-tight: 1.15;
+  --leading-snug: 1.3;
+  --leading-normal: 1.5;
+  --leading-relaxed: 1.65;
+
+  --weight-light: 300;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  --weight-bold: 700;
+
+  --tracking-tight: -0.02em;
+  --tracking-snug: -0.01em;
+  --tracking-normal: 0;
+  --tracking-wide: 0.06em; /* uppercase labels */
+
+  --numeric-tabular: tabular-nums;
+
+  /* --- Font families (tokens/fonts.css) ------------------------------------ */
+  /* The --font-*-var custom properties are injected by next/font/google
+     (see app/layout.tsx); the stacks below keep their real fallbacks. */
+  --font-sans: var(--font-public-sans), ui-sans-serif, system-ui, "Segoe UI",
+    Helvetica, Arial, sans-serif;
+  --font-mono: var(--font-ibm-plex-mono), ui-monospace, SFMono-Regular, Menlo,
+    monospace;
+  --font-display: var(--font-sans);
+  --font-body: var(--font-sans);
+  --font-numeric: var(--font-mono);
+
+  /* --- Spacing / layout constants (tokens/spacing.css) --------------------- */
+  --sidebar-width: 248px;
+  --sidebar-width-collapsed: 64px;
+  --topbar-height: 56px;
+  --content-max: 1240px;
+  --prose-max: 42rem;
+  --control-height-sm: 30px;
+  --control-height-md: 36px;
+  --control-height-lg: 44px;
+
+  /* --- Radius (tokens/radius.css) ------------------------------------------ */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 24px;
+  --radius-pill: 999px;
+  --radius-logo: 26%;
+
+  /* --- Elevation (tokens/elevation.css) ------------------------------------ */
+  --shadow-none: none;
+  --shadow-xs: 0 1px 2px rgba(18, 19, 42, 0.05);
+  --shadow-sm: 0 1px 3px rgba(18, 19, 42, 0.07), 0 1px 2px rgba(18, 19, 42, 0.04);
+  --shadow-md: 0 4px 12px rgba(18, 19, 42, 0.08), 0 1px 3px rgba(18, 19, 42, 0.05);
+  --shadow-lg: 0 12px 32px rgba(18, 19, 42, 0.12), 0 2px 6px rgba(18, 19, 42, 0.06);
+  --shadow-xl: 0 24px 64px rgba(18, 19, 42, 0.18);
+  --shadow-drag: 0 16px 32px rgba(18, 19, 42, 0.16);
+  --ring-brand: 0 0 0 3px rgba(108, 99, 255, 0.28);
+  --ring-danger: 0 0 0 3px rgba(229, 72, 77, 0.25);
+  --inset-hairline: inset 0 -1px 0 var(--border-subtle);
+
+  /* --- Motion (tokens/motion.css) ------------------------------------------ */
+  --duration-instant: 80ms;
+  --duration-fast: 120ms;
+  --duration-base: 180ms;
+  --duration-slow: 240ms;
+  --duration-slower: 320ms;
+  --ease-out: cubic-bezier(0.2, 0.8, 0.25, 1);
+  --ease-in-out: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-exit: cubic-bezier(0.4, 0, 1, 1);
+  --transition-control: background-color var(--duration-fast) var(--ease-out),
+    border-color var(--duration-fast) var(--ease-out),
+    color var(--duration-fast) var(--ease-out),
+    box-shadow var(--duration-fast) var(--ease-out);
 }
 
-html,
-body {
-  height: 100%;
+/* --- Dark scope (tokens/dark.css) ----------------------------------------- */
+[data-theme="dark"] {
+  --surface-page: var(--neutral-950);
+  --surface-card: var(--neutral-900);
+  --surface-raised: var(--neutral-800);
+  --surface-sunken: #080914;
+  --surface-hover: var(--neutral-800);
+  --surface-active: var(--neutral-700);
+  --surface-inverse: var(--neutral-0);
+  --surface-brand-subtle: rgba(108, 99, 255, 0.18);
+  --surface-success-subtle: rgba(34, 192, 140, 0.16);
+  --surface-warning-subtle: rgba(255, 176, 32, 0.16);
+  --surface-danger-subtle: rgba(229, 72, 77, 0.16);
+  --surface-overlay: rgba(5, 6, 14, 0.66);
+
+  --text-primary: var(--neutral-50);
+  --text-secondary: var(--neutral-300);
+  --text-muted: var(--neutral-400);
+  --text-subtle: var(--neutral-500);
+  --text-inverse: var(--neutral-900);
+  --text-brand: var(--indigo-300);
+  --text-link: var(--indigo-300);
+  --text-link-hover: var(--indigo-200);
+  --text-success: var(--kundeo-green);
+  --text-warning: var(--kundeo-amber);
+  --text-danger: #ff8085;
+
+  --border-subtle: rgba(255, 255, 255, 0.06);
+  --border-default: rgba(255, 255, 255, 0.12);
+  --border-strong: rgba(255, 255, 255, 0.22);
+
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.5);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.55);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.6);
+}
+
+/* ============================================================================
+   Tailwind theme — maps the tokens above onto utilities. `inline` keeps the
+   utilities pointed at the live custom properties, so every color follows the
+   [data-theme="dark"] cascade and nothing is frozen at build time.
+   ============================================================================ */
+@theme inline {
+  /* Fonts */
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  /* Type scale (font-size utilities: text-3xl … text-2xs) */
+  --text-3xl: var(--text-3xl);
+  --text-2xl: var(--text-2xl);
+  --text-xl: var(--text-xl);
+  --text-lg: var(--text-lg);
+  --text-md: var(--text-md);
+  --text-sm: var(--text-sm);
+  --text-xs: var(--text-xs);
+  --text-2xs: var(--text-2xs);
+
+  /* Line height (leading-*) */
+  --leading-tight: var(--leading-tight);
+  --leading-snug: var(--leading-snug);
+  --leading-normal: var(--leading-normal);
+  --leading-relaxed: var(--leading-relaxed);
+
+  /* Letter spacing (tracking-*) */
+  --tracking-tight: var(--tracking-tight);
+  --tracking-snug: var(--tracking-snug);
+  --tracking-normal: var(--tracking-normal);
+  --tracking-wide: var(--tracking-wide);
+
+  /* Radius (rounded-*) */
+  --radius-xs: var(--radius-xs);
+  --radius-sm: var(--radius-sm);
+  --radius-md: var(--radius-md);
+  --radius-lg: var(--radius-lg);
+  --radius-xl: var(--radius-xl);
+  --radius-2xl: var(--radius-2xl);
+  --radius-pill: var(--radius-pill);
+
+  /* Shadows (shadow-*) */
+  --shadow-xs: var(--shadow-xs);
+  --shadow-sm: var(--shadow-sm);
+  --shadow-md: var(--shadow-md);
+  --shadow-lg: var(--shadow-lg);
+  --shadow-xl: var(--shadow-xl);
+  --shadow-drag: var(--shadow-drag);
+
+  /* Easings (ease-*) */
+  --ease-out: var(--ease-out);
+  --ease-in-out: var(--ease-in-out);
+  --ease-exit: var(--ease-exit);
+
+  /* --- Colors — raw palette -------------------------------------------- */
+  --color-indigo-50: var(--indigo-50);
+  --color-indigo-100: var(--indigo-100);
+  --color-indigo-200: var(--indigo-200);
+  --color-indigo-300: var(--indigo-300);
+  --color-indigo-400: var(--indigo-400);
+  --color-indigo-500: var(--indigo-500);
+  --color-indigo-600: var(--indigo-600);
+  --color-indigo-700: var(--indigo-700);
+  --color-indigo-800: var(--indigo-800);
+  --color-indigo-900: var(--indigo-900);
+
+  --color-neutral-0: var(--neutral-0);
+  --color-neutral-25: var(--neutral-25);
+  --color-neutral-50: var(--neutral-50);
+  --color-neutral-100: var(--neutral-100);
+  --color-neutral-200: var(--neutral-200);
+  --color-neutral-300: var(--neutral-300);
+  --color-neutral-400: var(--neutral-400);
+  --color-neutral-500: var(--neutral-500);
+  --color-neutral-600: var(--neutral-600);
+  --color-neutral-700: var(--neutral-700);
+  --color-neutral-800: var(--neutral-800);
+  --color-neutral-900: var(--neutral-900);
+  --color-neutral-950: var(--neutral-950);
+
+  --color-green-100: var(--green-100);
+  --color-green-500: var(--green-500);
+  --color-green-600: var(--green-600);
+  --color-amber-100: var(--amber-100);
+  --color-amber-500: var(--amber-500);
+  --color-amber-600: var(--amber-600);
+  --color-red-100: var(--red-100);
+  --color-red-500: var(--red-500);
+  --color-red-600: var(--red-600);
+
+  /* --- Colors — semantic surfaces (bg-surface-*) ----------------------- */
+  --color-surface-page: var(--surface-page);
+  --color-surface-card: var(--surface-card);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-surface-inverse: var(--surface-inverse);
+  --color-surface-brand: var(--surface-brand);
+  --color-surface-brand-subtle: var(--surface-brand-subtle);
+  --color-surface-success-subtle: var(--surface-success-subtle);
+  --color-surface-warning-subtle: var(--surface-warning-subtle);
+  --color-surface-danger-subtle: var(--surface-danger-subtle);
+  --color-surface-overlay: var(--surface-overlay);
+
+  /* --- Colors — content / text (text-content, text-link, …) ------------ */
+  --color-content: var(--text-primary);
+  --color-content-secondary: var(--text-secondary);
+  --color-content-muted: var(--text-muted);
+  --color-content-subtle: var(--text-subtle);
+  --color-content-inverse: var(--text-inverse);
+  --color-on-brand: var(--text-on-brand);
+  --color-content-brand: var(--text-brand);
+  --color-link: var(--text-link);
+  --color-link-hover: var(--text-link-hover);
+  --color-success: var(--text-success);
+  --color-warning: var(--text-warning);
+  --color-danger: var(--text-danger);
+
+  /* --- Colors — borders (border-edge, border-edge-strong, …) ----------- */
+  --color-edge-subtle: var(--border-subtle);
+  --color-edge: var(--border-default);
+  --color-edge-strong: var(--border-strong);
+  --color-edge-brand: var(--border-brand);
+  --color-edge-danger: var(--border-danger);
+  --color-edge-focus: var(--border-focus);
+
+  /* --- Colors — brand interactive (bg-brand, hover:bg-brand-hover) ------ */
+  --color-brand: var(--brand-rest);
+  --color-brand-hover: var(--brand-hover);
+  --color-brand-active: var(--brand-active);
+
+  /* --- Colors — deal status (bg-status-won, text-status-lost, …) -------- */
+  --color-status-open: var(--status-open);
+  --color-status-won: var(--status-won);
+  --color-status-lost: var(--status-lost);
+  --color-status-idle: var(--status-idle);
+}
+
+@layer base {
+  body {
+    font-family: var(--font-sans);
+    font-feature-settings: normal;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Amounts, dates, percentages, IDs — mono with tabular figures. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
 }

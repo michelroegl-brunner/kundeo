@@ -35,3 +35,6 @@ coverage/
 # Misc
 *.tsbuildinfo
 next-env.d.ts
+
+# Local Claude Code skills/config (not synced)
+.claude/
