@@ -1,4 +1,4 @@
-# Kundeo
+# Kundeo - EARLY BUILD!
 
 **Open-source CRM built for the DACH market — self-hostable first, hosting always in mind.**
 
@@ -163,9 +163,6 @@ around it is on the roadmap:
   release tarball.
 - 🚧 GitHub Actions to publish the image and tarball on tag/release.
 
-Anything a hosted edition needs but self-host doesn't (billing, plan limits, org
-provisioning, usage metering) is designed as an **additive layer** — never a
-change to core tables or flows.
 
 ---
 
