@@ -75,11 +75,14 @@ export async function savePreferences(prefs: Record<string, unknown>): Promise<A
   }
 }
 
-export async function addStage(): Promise<ActionResult> {
+export async function addStage(pipelineId?: string): Promise<ActionResult> {
   try {
     await scoped(async (db) => {
-      const pipeline = await db.pipeline.findFirst({ where: { isDefault: true }, orderBy: { createdAt: "asc" } });
-      if (!pipeline) throw new Error("Keine Standard-Pipeline vorhanden.");
+      // Target the given pipeline (verified in-org by RLS) or the default one.
+      const pipeline = pipelineId
+        ? await db.pipeline.findFirst({ where: { id: pipelineId } })
+        : await db.pipeline.findFirst({ where: { isDefault: true }, orderBy: { createdAt: "asc" } });
+      if (!pipeline) throw new Error("Keine Pipeline vorhanden.");
       const max = await db.stage.aggregate({ where: { pipelineId: pipeline.id }, _max: { order: true } });
       await db.stage.create({
         data: { pipelineId: pipeline.id, name: "Neue Phase", order: (max._max.order ?? -1) + 1, probability: 0 },
@@ -90,6 +93,75 @@ export async function addStage(): Promise<ActionResult> {
     return { ok: true };
   } catch (e) {
     return { ok: false, error: message(e, "Phase konnte nicht angelegt werden.") };
+  }
+}
+
+/** Creates a new pipeline (not default) with one starter stage. */
+export async function createPipeline(name: string): Promise<ActionResult> {
+  try {
+    await scoped(async (db, organizationId) => {
+      const pipeline = await db.pipeline.create({
+        data: { organizationId, name: name.trim() || "Neue Pipeline", isDefault: false },
+      });
+      await db.stage.create({ data: { pipelineId: pipeline.id, name: "Neue Phase", order: 0, probability: 0 } });
+    });
+    revalidatePath("/settings");
+    revalidatePath("/deals");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: message(e, "Pipeline konnte nicht angelegt werden.") };
+  }
+}
+
+export async function renamePipeline(id: string, name: string): Promise<ActionResult> {
+  try {
+    await scoped((db) => db.pipeline.update({ where: { id }, data: { name: name.trim() || "Pipeline" } }));
+    revalidatePath("/settings");
+    revalidatePath("/deals");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: message(e, "Pipeline konnte nicht umbenannt werden.") };
+  }
+}
+
+/** Makes one pipeline the org default; clears the flag on the others. */
+export async function setDefaultPipeline(id: string): Promise<ActionResult> {
+  try {
+    await scoped(async (db) => {
+      const target = await db.pipeline.findFirst({ where: { id }, select: { id: true } });
+      if (!target) throw new Error("Pipeline nicht gefunden.");
+      await db.pipeline.updateMany({ data: { isDefault: false } }); // RLS scopes to the org
+      await db.pipeline.update({ where: { id }, data: { isDefault: true } });
+    });
+    revalidatePath("/settings");
+    revalidatePath("/deals");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: message(e, "Standard-Pipeline konnte nicht gesetzt werden.") };
+  }
+}
+
+/** Deletes a pipeline. Refuses the last one or any pipeline that still holds deals. */
+export async function deletePipeline(id: string): Promise<ActionResult> {
+  try {
+    await scoped(async (db) => {
+      const count = await db.pipeline.count();
+      if (count <= 1) throw new Error("Die letzte Pipeline kann nicht gelöscht werden.");
+      const target = await db.pipeline.findFirst({ where: { id }, select: { id: true, isDefault: true } });
+      if (!target) throw new Error("Pipeline nicht gefunden.");
+      const deals = await db.deal.count({ where: { pipelineId: id } });
+      if (deals > 0) throw new Error("Pipeline enthält Deals und kann nicht gelöscht werden.");
+      await db.pipeline.delete({ where: { id } }); // stages cascade
+      if (target.isDefault) {
+        const next = await db.pipeline.findFirst({ orderBy: { createdAt: "asc" }, select: { id: true } });
+        if (next) await db.pipeline.update({ where: { id: next.id }, data: { isDefault: true } });
+      }
+    });
+    revalidatePath("/settings");
+    revalidatePath("/deals");
+    return { ok: true };
+  } catch (e) {
+    return { ok: false, error: message(e, "Pipeline konnte nicht gelöscht werden.") };
   }
 }
 

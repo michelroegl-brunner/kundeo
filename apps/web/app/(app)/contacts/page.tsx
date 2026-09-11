@@ -2,6 +2,7 @@ import { getSession, scoped } from "@/lib/session";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { ContactsList, type ContactRow } from "@/components/contacts/contacts-list";
+import { ContactsHeader } from "@/components/contacts/contacts-header";
 
 export const dynamic = "force-dynamic";
 
@@ -9,8 +10,8 @@ export default async function ContactsPage() {
   const session = await getSession();
   const userId = session?.user.id;
 
-  const { contacts, members } = await scoped(async (db) => {
-    const [contacts, members] = await Promise.all([
+  const { contacts, members, companies } = await scoped(async (db) => {
+    const [contacts, members, companies] = await Promise.all([
       db.contact.findMany({
         include: {
           company: { select: { name: true, city: true, country: true } },
@@ -19,19 +20,23 @@ export default async function ContactsPage() {
         orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
       }),
       db.member.findMany({ include: { user: { select: { id: true, name: true } } } }),
+      db.company.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } }),
     ]);
-    return { contacts, members };
+    return { contacts, members, companies };
   });
 
   if (contacts.length === 0) {
     return (
-      <Card>
-        <EmptyState
-          icon="users"
-          title="Noch keine Kontakte"
-          description="Sobald Kontakte angelegt sind, erscheinen sie hier als durchsuchbare Liste."
-        />
-      </Card>
+      <>
+        <ContactsHeader companies={companies} />
+        <Card>
+          <EmptyState
+            icon="users"
+            title="Noch keine Kontakte"
+            description="Sobald Kontakte angelegt sind, erscheinen sie hier als durchsuchbare Liste."
+          />
+        </Card>
+      </>
     );
   }
 
@@ -54,5 +59,10 @@ export default async function ContactsPage() {
     tags: c.tags.map((t) => t.tag),
   }));
 
-  return <ContactsList rows={rows} />;
+  return (
+    <>
+      <ContactsHeader companies={companies} />
+      <ContactsList rows={rows} />
+    </>
+  );
 }

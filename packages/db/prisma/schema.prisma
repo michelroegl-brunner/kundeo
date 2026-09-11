@@ -242,9 +242,17 @@ model Deal {
   id             String    @id @default(cuid())
   organizationId String
   title          String
-  // amounts stored in minor units (cents) to avoid float errors
+  // amounts stored in minor units (cents) to avoid float errors.
+  // amountCents is always the *effective* value: in EFFORT mode it is
+  // materialised from hoursPerWeek * hourlyRateCents * period factor, so every
+  // reader (pipeline sums, forecast, automation conditions) can keep reading it.
   amountCents    Int       @default(0)
   currency       String    @default("EUR") // EUR | CHF
+  // value mode: FIXED = amountCents entered directly; EFFORT = derived from effort
+  valueMode      DealValueMode @default(FIXED)
+  hoursPerWeek   Decimal?      @db.Decimal(6, 2)
+  hourlyRateCents Int?
+  effortPeriod   EffortPeriod? // basis for turning the weekly effort into amountCents
   status         DealStatus @default(OPEN)
   pipelineId     String
   stageId        String
@@ -274,6 +282,17 @@ enum DealStatus {
   OPEN
   WON
   LOST
+}
+
+enum DealValueMode {
+  FIXED
+  EFFORT
+}
+
+enum EffortPeriod {
+  WEEKLY
+  MONTHLY
+  ANNUAL
 }
 
 model Activity {

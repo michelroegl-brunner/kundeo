@@ -237,7 +237,12 @@ async function setField(ctx: ActionContext): Promise<ActionOutcome> {
   if (field === "amount") {
     const cents = parseMoneyToCents(value);
     if (cents == null) return { status: "ERROR", message: `Ungültiger Betrag „${value}“`, errorCode: "BAD_VALUE" };
-    await ctx.tx.deal.update({ where: { id: ctx.loaded.data.id }, data: { amountCents: cents } });
+    // Setting a fixed amount switches the deal to FIXED mode and clears any
+    // effort inputs, so amountCents stays consistent with the value mode.
+    await ctx.tx.deal.update({
+      where: { id: ctx.loaded.data.id },
+      data: { amountCents: cents, valueMode: "FIXED", hoursPerWeek: null, hourlyRateCents: null, effortPeriod: null },
+    });
     return { status: "OK", message: `Betrag gesetzt: ${value}` };
   }
   if (field === "stage") {

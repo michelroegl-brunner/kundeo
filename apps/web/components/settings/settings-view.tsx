@@ -20,6 +20,10 @@ import {
   addStage,
   saveStages,
   removeStage,
+  createPipeline,
+  renamePipeline,
+  setDefaultPipeline,
+  deletePipeline,
   type ActionResult,
 } from "@/app/(app)/settings/actions";
 
@@ -41,6 +45,13 @@ export interface StageItem {
   deals: number;
 }
 
+export interface PipelineItem {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  stages: StageItem[];
+}
+
 export interface NotificationPrefs {
   email: { newActivities: boolean; dueTasks: boolean; dealWonLost: boolean; weeklyPipeline: boolean };
   inApp: { assignments: boolean; mentions: boolean; stageChanges: boolean };
@@ -58,12 +69,12 @@ export interface InstanceInfo {
 export interface SettingsViewProps {
   org: { name: string; slug: string; currency: string; country: string; vatId: string; timezone: string };
   orgIdMasked: string;
-  stages: StageItem[];
+  pipelines: PipelineItem[];
   prefs: NotificationPrefs;
   instance: InstanceInfo;
 }
 
-export function SettingsView({ org, orgIdMasked, stages, prefs, instance }: SettingsViewProps) {
+export function SettingsView({ org, orgIdMasked, pipelines, prefs, instance }: SettingsViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState("org");
   const [pending, startTransition] = useTransition();
@@ -96,7 +107,7 @@ export function SettingsView({ org, orgIdMasked, stages, prefs, instance }: Sett
       {tab === "org" ? (
         <OrgTab org={org} orgIdMasked={orgIdMasked} pending={pending} run={run} />
       ) : tab === "pipelines" ? (
-        <PipelinesTab stages={stages} pending={pending} run={run} />
+        <PipelinesTab pipelines={pipelines} pending={pending} run={run} />
       ) : tab === "notifications" ? (
         <NotificationsTab prefs={prefs} pending={pending} run={run} />
       ) : (
@@ -188,25 +199,111 @@ function OrgTab({
   );
 }
 
-function PipelinesTab({ stages, pending, run }: { stages: StageItem[]; pending: boolean; run: RunFn }) {
-  const [rows, setRows] = useState(stages);
-  const dirty = JSON.stringify(rows.map((r) => ({ id: r.id, name: r.name, probability: r.probability }))) !==
-    JSON.stringify(stages.map((r) => ({ id: r.id, name: r.name, probability: r.probability })));
+function PipelinesTab({ pipelines, pending, run }: { pipelines: PipelineItem[]; pending: boolean; run: RunFn }) {
+  const [selectedId, setSelectedId] = useState(pipelines[0]?.id ?? "");
+  const [newName, setNewName] = useState("");
+  const selected = pipelines.find((p) => p.id === selectedId) ?? pipelines[0];
+
+  return (
+    <div className="flex flex-col gap-4">
+      <Card title="Pipelines" subtitle="Vertriebsprozesse Ihrer Organisation">
+        <div className="flex flex-col gap-2">
+          {pipelines.map((p) => {
+            const totalDeals = p.stages.reduce((a, s) => a + s.deals, 0);
+            const active = p.id === selected?.id;
+            return (
+              <div
+                key={p.id}
+                className={
+                  "flex items-center gap-3 rounded-md border p-3 " +
+                  (active ? "border-edge-brand bg-surface-brand-subtle" : "border-edge")
+                }
+              >
+                <button
+                  type="button"
+                  onClick={() => setSelectedId(p.id)}
+                  className="min-w-0 flex-1 cursor-pointer text-left font-sans text-sm font-medium text-content"
+                >
+                  {p.name}
+                </button>
+                {p.isDefault ? (
+                  <Badge tone="success">Standard</Badge>
+                ) : (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    loading={pending}
+                    onClick={() => run(() => setDefaultPipeline(p.id), { tone: "success", title: "Standard-Pipeline gesetzt" })}
+                  >
+                    Als Standard
+                  </Button>
+                )}
+                <span className="w-[90px] text-right font-sans text-xs text-content-muted">
+                  {p.stages.length} Phasen · {totalDeals} Deals
+                </span>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  iconLeft="trash-2"
+                  disabled={pipelines.length <= 1 || totalDeals > 0}
+                  onClick={() => run(() => deletePipeline(p.id), { tone: "success", title: "Pipeline gelöscht" })}
+                >
+                  Löschen
+                </Button>
+              </div>
+            );
+          })}
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Input
+            size="sm"
+            placeholder="Name der neuen Pipeline …"
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            fullWidth={false}
+            style={{ width: 240 }}
+          />
+          <Button
+            size="sm"
+            variant="secondary"
+            iconLeft="plus"
+            loading={pending}
+            disabled={!newName.trim()}
+            onClick={() =>
+              run(() => createPipeline(newName), { tone: "success", title: "Pipeline angelegt" }, () => setNewName(""))
+            }
+          >
+            Pipeline anlegen
+          </Button>
+        </div>
+      </Card>
+
+      {selected ? <StageEditor key={selected.id} pipeline={selected} pending={pending} run={run} /> : null}
+    </div>
+  );
+}
+
+function StageEditor({ pipeline, pending, run }: { pipeline: PipelineItem; pending: boolean; run: RunFn }) {
+  const [name, setName] = useState(pipeline.name);
+  const [rows, setRows] = useState(pipeline.stages);
+  const stagesDirty =
+    JSON.stringify(rows.map((r) => ({ id: r.id, name: r.name, probability: r.probability }))) !==
+    JSON.stringify(pipeline.stages.map((r) => ({ id: r.id, name: r.name, probability: r.probability })));
 
   const update = (id: string, patch: Partial<StageItem>) =>
     setRows((rs) => rs.map((r) => (r.id === id ? { ...r, ...patch } : r)));
 
   return (
     <Card
-      title="Pipeline „Vertrieb“"
-      subtitle="Standard-Pipeline · Phasen und Wahrscheinlichkeiten"
+      title={`Phasen · ${pipeline.name}`}
+      subtitle="Phasen und Wahrscheinlichkeiten für die gewählte Pipeline"
       actions={
         <Button
           variant="ghost"
           size="sm"
           iconLeft="plus"
           loading={pending}
-          onClick={() => run(() => addStage(), { tone: "success", title: "Phase angelegt" })}
+          onClick={() => run(() => addStage(pipeline.id), { tone: "success", title: "Phase angelegt" })}
         >
           Phase
         </Button>
@@ -216,7 +313,7 @@ function PipelinesTab({ stages, pending, run }: { stages: StageItem[]; pending: 
           <Button
             size="sm"
             loading={pending}
-            disabled={!dirty}
+            disabled={!stagesDirty}
             onClick={() =>
               run(
                 () => saveStages(rows.map((r) => ({ id: r.id, name: r.name, probability: r.probability }))),
@@ -229,6 +326,21 @@ function PipelinesTab({ stages, pending, run }: { stages: StageItem[]; pending: 
         </div>
       }
     >
+      <div className="mb-4 flex items-end gap-2">
+        <Field label="Pipeline-Name" className="flex-1">
+          <Input size="sm" value={name} onChange={(e) => setName(e.target.value)} />
+        </Field>
+        <Button
+          size="sm"
+          variant="secondary"
+          loading={pending}
+          disabled={name.trim() === pipeline.name || !name.trim()}
+          onClick={() => run(() => renamePipeline(pipeline.id, name), { tone: "success", title: "Pipeline umbenannt" })}
+        >
+          Umbenennen
+        </Button>
+      </div>
+
       <div className="flex flex-col gap-2">
         {rows.map((s, i) => (
           <div key={s.id} className="flex items-center gap-3 rounded-md border border-edge p-3">
@@ -257,7 +369,7 @@ function PipelinesTab({ stages, pending, run }: { stages: StageItem[]; pending: 
               size="sm"
               variant="ghost"
               iconLeft="trash-2"
-              disabled={s.deals > 0}
+              disabled={s.deals > 0 || rows.length <= 1}
               onClick={() => run(() => removeStage(s.id), { tone: "success", title: "Phase entfernt" })}
             >
               Entfernen

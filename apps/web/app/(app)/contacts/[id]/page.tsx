@@ -12,6 +12,7 @@ import {
   type PanelActivity,
   type PanelDeal,
 } from "@/components/contacts/contact-panels";
+import type { ContactTag } from "@/components/contacts/contact-panels";
 import type { ActivityKind } from "./actions";
 
 export const dynamic = "force-dynamic";
@@ -69,7 +70,7 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
     });
     if (!contact) return null;
 
-    const [deals, activities, members] = await Promise.all([
+    const [deals, activities, members, allTags] = await Promise.all([
       db.deal.findMany({
         where: { contactId: id },
         include: { company: { select: { name: true } }, stage: { select: { name: true } } },
@@ -77,12 +78,13 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
       }),
       db.activity.findMany({ where: { contactId: id }, orderBy: { createdAt: "desc" } }),
       db.member.findMany({ include: { user: { select: { id: true, name: true } } } }),
+      db.tag.findMany({ select: { name: true }, orderBy: { name: "asc" } }),
     ]);
-    return { contact, deals, activities, members };
+    return { contact, deals, activities, members, allTags };
   });
 
   if (!data) notFound();
-  const { contact, deals, activities, members } = data;
+  const { contact, deals, activities, members, allTags } = data;
 
   const nameById = new Map(members.map((m) => [m.user.id, m.user.name]));
   const ownerName = (contact.ownerId && nameById.get(contact.ownerId)) || "";
@@ -117,6 +119,8 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
     dueLabel: d.expectedCloseAt ? formatDate(d.expectedCloseAt) : undefined,
     overdue: d.expectedCloseAt ? d.expectedCloseAt.getTime() < now : false,
   }));
+
+  const panelTags: ContactTag[] = contact.tags.map((t) => ({ id: t.tag.id, name: t.tag.name, color: t.tag.color }));
 
   return (
     <>
@@ -165,6 +169,8 @@ export default async function ContactDetailPage({ params }: { params: Promise<{ 
             phone: contact.phone ?? "",
             position: contact.position ?? "",
           }}
+          tags={panelTags}
+          tagSuggestions={allTags.map((t) => t.name)}
         />
 
         <div className="flex flex-col gap-4">

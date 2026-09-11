@@ -3,7 +3,7 @@ import { getSession, ensureActiveOrgId, scoped } from "@/lib/session";
 import {
   SettingsView,
   type NotificationPrefs,
-  type StageItem,
+  type PipelineItem,
 } from "@/components/settings/settings-view";
 import pkg from "../../../package.json";
 
@@ -41,10 +41,9 @@ export default async function SettingsPage() {
 
   const meta = parseMetadata(org?.metadata ?? null);
 
-  const { stages } = await scoped(async (db) => {
-    const pipeline = await db.pipeline.findFirst({
-      where: { isDefault: true },
-      orderBy: { createdAt: "asc" },
+  const { pipelines } = await scoped(async (db) => {
+    const pipelines = await db.pipeline.findMany({
+      orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
       include: {
         stages: {
           orderBy: { order: "asc" },
@@ -52,14 +51,19 @@ export default async function SettingsPage() {
         },
       },
     });
-    return { stages: pipeline?.stages ?? [] };
+    return { pipelines };
   });
 
-  const stageItems: StageItem[] = stages.map((s) => ({
-    id: s.id,
-    name: s.name,
-    probability: s.probability,
-    deals: s._count.deals,
+  const pipelineItems: PipelineItem[] = pipelines.map((p) => ({
+    id: p.id,
+    name: p.name,
+    isDefault: p.isDefault,
+    stages: p.stages.map((s) => ({
+      id: s.id,
+      name: s.name,
+      probability: s.probability,
+      deals: s._count.deals,
+    })),
   }));
 
   const storedPrefs = (meta.notifications as Record<string, NotificationPrefs> | undefined)?.[session?.user.id ?? ""];
@@ -95,7 +99,7 @@ export default async function SettingsPage() {
     <SettingsView
       org={orgSettings}
       orgIdMasked="app.current_org_id"
-      stages={stageItems}
+      pipelines={pipelineItems}
       prefs={prefs}
       instance={instance}
     />

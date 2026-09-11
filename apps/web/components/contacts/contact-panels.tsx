@@ -6,13 +6,15 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Select } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { Input } from "@/components/ui/input";
 import { Tabs } from "@/components/ui/tabs";
 import { Field } from "@/components/ui/field";
+import { Tag } from "@/components/ui/tag";
 import { ActivityItem } from "@/components/ui/activity-item";
 import { DealCard } from "@/components/ui/deal-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Toast } from "@/components/ui/toast";
-import { addActivity, type ActivityKind } from "@/app/(app)/contacts/[id]/actions";
+import { addActivity, addContactTag, removeContactTag, type ActivityKind } from "@/app/(app)/contacts/[id]/actions";
 
 export interface PanelActivity {
   id: string;
@@ -44,11 +46,20 @@ export interface ContactMasterData {
   position: string;
 }
 
+export interface ContactTag {
+  id: string;
+  name: string;
+  color: string;
+}
+
 export interface ContactPanelsProps {
   contactId: string;
   activities: PanelActivity[];
   deals: PanelDeal[];
   master: ContactMasterData;
+  tags: ContactTag[];
+  /** All org tag names, for add-tag suggestions. */
+  tagSuggestions: string[];
 }
 
 const TYPE_OPTIONS = [
@@ -67,11 +78,12 @@ function InfoRow({ label, value }: { label: string; value: string }) {
   );
 }
 
-export function ContactPanels({ contactId, activities, deals, master }: ContactPanelsProps) {
+export function ContactPanels({ contactId, activities, deals, master, tags, tagSuggestions }: ContactPanelsProps) {
   const router = useRouter();
   const [tab, setTab] = useState("activities");
   const [note, setNote] = useState("");
   const [type, setType] = useState<ActivityKind>("NOTE");
+  const [tagInput, setTagInput] = useState("");
   const [pending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
@@ -85,6 +97,31 @@ export function ContactPanels({ contactId, activities, deals, master }: ContactP
         router.refresh();
       } catch {
         setError("Aktivität konnte nicht gespeichert werden.");
+      }
+    });
+  }
+
+  function addTag() {
+    const name = tagInput.trim();
+    if (!name) return;
+    startTransition(async () => {
+      try {
+        await addContactTag(contactId, name);
+        setTagInput("");
+        router.refresh();
+      } catch {
+        setError("Tag konnte nicht hinzugefügt werden.");
+      }
+    });
+  }
+
+  function removeTag(tagId: string) {
+    startTransition(async () => {
+      try {
+        await removeContactTag(contactId, tagId);
+        router.refresh();
+      } catch {
+        setError("Tag konnte nicht entfernt werden.");
       }
     });
   }
@@ -173,17 +210,58 @@ export function ContactPanels({ contactId, activities, deals, master }: ContactP
           </Card>
         )
       ) : (
-        <Card title="Stammdaten" subtitle="DACH-Felder aus dem Datenmodell">
-          <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
-            <InfoRow label="Anrede" value={master.salutation} />
-            <InfoRow label="Titel" value={master.title} />
-            <InfoRow label="Vorname" value={master.firstName} />
-            <InfoRow label="Nachname" value={master.lastName} />
-            <InfoRow label="E-Mail" value={master.email} />
-            <InfoRow label="Telefon" value={master.phone} />
-            <InfoRow label="Position" value={master.position} />
-          </div>
-        </Card>
+        <>
+          <Card title="Stammdaten" subtitle="DACH-Felder aus dem Datenmodell">
+            <div className="grid grid-cols-2 gap-4 max-md:grid-cols-1">
+              <InfoRow label="Anrede" value={master.salutation} />
+              <InfoRow label="Titel" value={master.title} />
+              <InfoRow label="Vorname" value={master.firstName} />
+              <InfoRow label="Nachname" value={master.lastName} />
+              <InfoRow label="E-Mail" value={master.email} />
+              <InfoRow label="Telefon" value={master.phone} />
+              <InfoRow label="Position" value={master.position} />
+            </div>
+          </Card>
+
+          <Card title="Tags" subtitle="Auslöser für „Kontakt getaggt“-Automationen">
+            {tags.length ? (
+              <div className="mb-3 flex flex-wrap gap-1.5">
+                {tags.map((t) => (
+                  <Tag key={t.id} color={t.color} onRemove={() => removeTag(t.id)}>
+                    {t.name}
+                  </Tag>
+                ))}
+              </div>
+            ) : (
+              <p className="mb-3 font-sans text-xs text-content-muted">Noch keine Tags.</p>
+            )}
+            <div className="flex items-center gap-2">
+              <Input
+                size="sm"
+                fullWidth={false}
+                placeholder="Tag hinzufügen …"
+                value={tagInput}
+                onChange={(e) => setTagInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    addTag();
+                  }
+                }}
+                list="contact-tag-suggestions"
+                style={{ width: 220 }}
+              />
+              <datalist id="contact-tag-suggestions">
+                {tagSuggestions.map((s) => (
+                  <option key={s} value={s} />
+                ))}
+              </datalist>
+              <Button size="sm" variant="secondary" iconLeft="plus" disabled={!tagInput.trim()} loading={pending} onClick={addTag}>
+                Hinzufügen
+              </Button>
+            </div>
+          </Card>
+        </>
       )}
 
       {error ? (

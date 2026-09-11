@@ -3,11 +3,14 @@
 import { useEffect, useMemo, useState, useTransition, type DragEvent } from "react";
 import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
+import { PageHeader } from "@/components/app-shell";
 import { DealCard } from "@/components/ui/deal-card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { Select } from "@/components/ui/select";
 import { Toast } from "@/components/ui/toast";
-import { moveDeal } from "@/app/(app)/deals/actions";
+import { Icon } from "@/components/ui/icon";
+import { DealCreateDialog, type DealFormOptions } from "@/components/pipeline/deal-create-dialog";
+import { moveDeal, winDeal, loseDeal } from "@/app/(app)/deals/actions";
 
 export interface PipelineStage {
   id: string;
@@ -33,6 +36,8 @@ export interface PipelineBoardProps {
   deals: PipelineDeal[];
   /** ownerId → display name, for the owner filter. */
   owners: { id: string; name: string }[];
+  /** Options for the "Deal anlegen" dialog. */
+  createOptions: DealFormOptions;
 }
 
 function sumCents(deals: PipelineDeal[]): string {
@@ -40,7 +45,7 @@ function sumCents(deals: PipelineDeal[]): string {
   return (total / 100).toLocaleString("de-DE", { maximumFractionDigits: 0 }) + " EUR";
 }
 
-export function PipelineBoard({ stages, deals, owners }: PipelineBoardProps) {
+export function PipelineBoard({ stages, deals, owners, createOptions }: PipelineBoardProps) {
   const router = useRouter();
   const [, startTransition] = useTransition();
 
@@ -86,6 +91,21 @@ export function PipelineBoard({ stages, deals, owners }: PipelineBoardProps) {
     });
   }
 
+  // Won/lost closes the deal; it leaves the open board, so remove it optimistically.
+  function close(id: string, outcome: "won" | "lost") {
+    const previous = board;
+    setBoard((b) => b.filter((d) => d.id !== id));
+    startTransition(async () => {
+      try {
+        await (outcome === "won" ? winDeal(id) : loseDeal(id));
+        router.refresh();
+      } catch {
+        setBoard(previous);
+        setError(outcome === "won" ? "Deal konnte nicht als gewonnen markiert werden." : "Deal konnte nicht als verloren markiert werden.");
+      }
+    });
+  }
+
   const ownerOptions = [
     { value: "all", label: "Alle Inhaber" },
     ...owners.map((o) => ({ value: o.id, label: o.name })),
@@ -93,6 +113,7 @@ export function PipelineBoard({ stages, deals, owners }: PipelineBoardProps) {
 
   return (
     <>
+      <PageHeader actions={<DealCreateDialog options={createOptions} />} />
       <div className="flex items-center gap-3">
         {owners.length ? (
           <Select
@@ -163,6 +184,24 @@ export function PipelineBoard({ stages, deals, owners }: PipelineBoardProps) {
                       dueLabel={d.dueLabel}
                       overdue={d.overdue}
                       dragging={draggingId === d.id}
+                      footer={
+                        <>
+                          <button
+                            type="button"
+                            onClick={() => close(d.id, "won")}
+                            className="inline-flex items-center gap-1 rounded font-sans text-2xs font-medium text-success transition hover:opacity-80"
+                          >
+                            <Icon name="check" size={12} /> Gewonnen
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => close(d.id, "lost")}
+                            className="ml-auto inline-flex items-center gap-1 rounded font-sans text-2xs font-medium text-content-muted transition hover:text-danger"
+                          >
+                            <Icon name="x" size={12} /> Verloren
+                          </button>
+                        </>
+                      }
                     />
                   </div>
                 ))

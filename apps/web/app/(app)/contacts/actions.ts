@@ -31,7 +31,6 @@ export async function createContact(formData: FormData) {
   );
   await emitEvent("contact.created", { type: "Contact", id: contact.id });
   revalidatePath("/contacts");
-  redirect("/contacts");
 }
 
 export async function updateContact(id: string, formData: FormData) {
@@ -40,7 +39,6 @@ export async function updateContact(id: string, formData: FormData) {
   await emitEvent("contact.updated", { type: "Contact", id });
   revalidatePath("/contacts");
   revalidatePath(`/contacts/${id}`);
-  redirect("/contacts");
 }
 
 export async function deleteContact(id: string) {

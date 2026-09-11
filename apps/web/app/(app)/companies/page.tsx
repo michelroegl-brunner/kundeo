@@ -2,6 +2,7 @@ import { scoped } from "@/lib/session";
 import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { CompaniesList, type CompanyRow } from "@/components/companies/companies-list";
+import { CompaniesHeader } from "@/components/companies/companies-header";
 
 export const dynamic = "force-dynamic";
 
@@ -19,13 +20,16 @@ export default async function CompaniesPage() {
 
   if (companies.length === 0) {
     return (
-      <Card>
-        <EmptyState
-          icon="building-2"
-          title="Noch keine Firmen"
-          description="Sobald Firmen angelegt sind, erscheinen sie hier als durchsuchbare Liste."
-        />
-      </Card>
+      <>
+        <CompaniesHeader />
+        <Card>
+          <EmptyState
+            icon="building-2"
+            title="Noch keine Firmen"
+            description="Sobald Firmen angelegt sind, erscheinen sie hier als durchsuchbare Liste."
+          />
+        </Card>
+      </>
     );
   }
 
@@ -56,5 +60,10 @@ export default async function CompaniesPage() {
     };
   });
 
-  return <CompaniesList rows={rows} />;
+  return (
+    <>
+      <CompaniesHeader />
+      <CompaniesList rows={rows} />
+    </>
+  );
 }

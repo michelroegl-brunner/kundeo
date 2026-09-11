@@ -3,6 +3,7 @@ import { Card } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { formatDate } from "@/lib/format";
 import { ActivitiesView, type FeedRow, type TaskRow } from "@/components/activities/activities-view";
+import { TaskCreateDialog } from "@/components/activities/task-create-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -19,8 +20,8 @@ function fmtDateTime(value: Date): string {
 }
 
 export default async function ActivitiesPage() {
-  const { activities, members } = await scoped(async (db) => {
-    const [activities, members] = await Promise.all([
+  const { activities, members, contacts, deals } = await scoped(async (db) => {
+    const [activities, members, contacts, deals] = await Promise.all([
       db.activity.findMany({
         include: {
           contact: { select: { firstName: true, lastName: true } },
@@ -29,19 +30,31 @@ export default async function ActivitiesPage() {
         orderBy: { createdAt: "desc" },
       }),
       db.member.findMany({ include: { user: { select: { id: true, name: true } } } }),
+      db.contact.findMany({ select: { id: true, firstName: true, lastName: true }, orderBy: { lastName: "asc" } }),
+      db.deal.findMany({ where: { status: "OPEN" }, select: { id: true, title: true }, orderBy: { updatedAt: "desc" } }),
     ]);
-    return { activities, members };
+    return { activities, members, contacts, deals };
   });
+
+  const taskCreate = (
+    <TaskCreateDialog
+      contacts={contacts.map((c) => ({ id: c.id, name: `${c.firstName} ${c.lastName}`.trim() }))}
+      deals={deals}
+    />
+  );
 
   if (activities.length === 0) {
     return (
-      <Card>
-        <EmptyState
-          icon="activity"
-          title="Noch keine Aktivitäten"
-          description="Notizen, Anrufe, Termine und Aufgaben aus der gesamten Organisation erscheinen hier."
-        />
-      </Card>
+      <>
+        {taskCreate}
+        <Card>
+          <EmptyState
+            icon="activity"
+            title="Noch keine Aktivitäten"
+            description="Notizen, Anrufe, Termine und Aufgaben aus der gesamten Organisation erscheinen hier."
+          />
+        </Card>
+      </>
     );
   }
 
@@ -69,5 +82,10 @@ export default async function ActivitiesPage() {
     timestamp: fmtDateTime(a.createdAt),
   }));
 
-  return <ActivitiesView tasks={tasks} feed={feed} />;
+  return (
+    <>
+      {taskCreate}
+      <ActivitiesView tasks={tasks} feed={feed} />
+    </>
+  );
 }

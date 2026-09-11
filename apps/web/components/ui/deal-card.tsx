@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { cn } from "@/lib/utils";
 import { Icon } from "./icon";
 import { Avatar } from "./avatar";
@@ -20,6 +20,8 @@ export interface DealCardProps {
   overdue?: boolean;
   /** Drag affordance: rotate -1deg + --shadow-drag. */
   dragging?: boolean;
+  /** Optional action row rendered at the bottom of the card (e.g. won/lost). */
+  footer?: ReactNode;
   onClick?: () => void;
   className?: string;
   style?: CSSProperties;
@@ -34,6 +36,7 @@ export function DealCard({
   dueLabel,
   overdue = false,
   dragging = false,
+  footer,
   onClick,
   className,
   style,
@@ -74,6 +77,7 @@ export function DealCard({
           {dueLabel}
         </span>
       ) : null}
+      {footer ? <div className="mt-0.5 flex items-center gap-1.5 border-t border-edge-subtle pt-2">{footer}</div> : null}
     </article>
   );
 }

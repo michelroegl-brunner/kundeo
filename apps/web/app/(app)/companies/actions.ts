@@ -33,7 +33,6 @@ export async function createCompany(formData: FormData) {
   );
   await emitEvent("company.created", { type: "Company", id: company.id });
   revalidatePath("/companies");
-  redirect("/companies");
 }
 
 export async function updateCompany(id: string, formData: FormData) {
@@ -42,7 +41,6 @@ export async function updateCompany(id: string, formData: FormData) {
   await emitEvent("company.updated", { type: "Company", id });
   revalidatePath("/companies");
   revalidatePath(`/companies/${id}`);
-  redirect("/companies");
 }
 
 export async function deleteCompany(id: string) {
