@@ -17,6 +17,7 @@ import { buildTree, type FlowStep, type FlatStep, type FilterClause } from "@/co
 import { getEmailSender } from "@/lib/email";
 import { loadRecord, evaluateClause, evaluateAll, type LoadedRecord, type RecordType } from "./records";
 import { executeAction, type PendingSideEffect } from "./actions-exec";
+import { assertPublicHttpUrl } from "./url-guard";
 
 type Tx = Prisma.TransactionClient;
 type Signal = "continue" | "stop" | "suspend" | "error";
@@ -192,6 +193,9 @@ function errText(err: unknown): string {
 }
 
 async function callWebhook(url: string, payload: Record<string, unknown>): Promise<string> {
+  // SSRF guard: reject internal/metadata targets before fetching, and never
+  // follow a redirect (which could bounce to an internal host).
+  await assertPublicHttpUrl(url);
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 10_000);
   try {
@@ -200,6 +204,7 @@ async function callWebhook(url: string, payload: Record<string, unknown>): Promi
       headers: { "content-type": "application/json" },
       body: JSON.stringify(payload),
       signal: controller.signal,
+      redirect: "manual",
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     return `Webhook aufgerufen (HTTP ${res.status})`;
