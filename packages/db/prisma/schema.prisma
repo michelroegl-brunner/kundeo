@@ -1,0 +1,324 @@
+// Kundeo database schema
+// Multi-tenancy: every tenant-scoped row carries `organizationId`.
+// Isolation is enforced at the database level via Postgres Row-Level Security
+// (see prisma/migrations/*_rls). A self-hosted instance simply runs a single
+// organization; the hosted version packs many organizations per database.
+
+generator client {
+  provider = "prisma-client-js"
+  output   = "../generated/client"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Better Auth — core tables (user, session, account, verification)
+// These are owned by Better Auth's Prisma adapter. Do not rename fields.
+// ───────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  sessions     Session[]
+  accounts     Account[]
+  members      Member[]
+  invitations  Invitation[]
+
+  @@map("user")
+}
+
+model Session {
+  id                   String   @id
+  expiresAt            DateTime
+  token                String   @unique
+  ipAddress            String?
+  userAgent            String?
+  userId               String
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+  // set by the organization plugin to the user's active org
+  activeOrganizationId String?
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@map("verification")
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// Better Auth — organization plugin (the tenant boundary)
+// ───────────────────────────────────────────────────────────────────────────
+
+model Organization {
+  id        String   @id
+  name      String
+  slug      String   @unique
+  logo      String?
+  metadata  String?
+  createdAt DateTime @default(now())
+
+  members     Member[]
+  invitations Invitation[]
+
+  // tenant-scoped CRM data
+  contacts   Contact[]
+  companies  Company[]
+  pipelines  Pipeline[]
+  deals      Deal[]
+  activities Activity[]
+  tags       Tag[]
+
+  @@map("organization")
+}
+
+model Member {
+  id             String   @id
+  organizationId String
+  userId         String
+  role           String   @default("member")
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  user         User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, userId])
+  @@map("member")
+}
+
+model Invitation {
+  id             String   @id
+  organizationId String
+  email          String
+  role           String?
+  status         String   @default("pending")
+  expiresAt      DateTime
+  inviterId      String
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  inviter      User         @relation(fields: [inviterId], references: [id], onDelete: Cascade)
+
+  @@map("invitation")
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// CRM domain — all tenant-scoped by organizationId
+// ───────────────────────────────────────────────────────────────────────────
+
+model Company {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  domain         String?
+  industry       String?
+  // DACH-relevant fields
+  vatId          String? // USt-IdNr. / UID
+  street         String?
+  postalCode     String?
+  city           String?
+  country        String   @default("DE") // DE | AT | CH
+  phone          String?
+  website        String?
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts     Contact[]
+  deals        Deal[]
+
+  @@index([organizationId])
+  @@index([organizationId, name])
+  @@map("company")
+}
+
+model Contact {
+  id             String   @id @default(cuid())
+  organizationId String
+  firstName      String
+  lastName       String
+  email          String?
+  phone          String?
+  // DACH formal address: "Herr" / "Frau" + optional title ("Dr.", "Prof.")
+  salutation     String?
+  title          String?
+  position       String?
+  companyId      String?
+  ownerId        String? // User.id of the responsible sales rep
+  notes          String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  company      Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  deals        Deal[]
+  activities   Activity[]
+  tags         ContactTag[]
+
+  @@index([organizationId])
+  @@index([organizationId, lastName])
+  @@index([organizationId, email])
+  @@map("contact")
+}
+
+model Pipeline {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  isDefault      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  stages       Stage[]
+  deals        Deal[]
+
+  @@index([organizationId])
+  @@map("pipeline")
+}
+
+model Stage {
+  id          String  @id @default(cuid())
+  pipelineId  String
+  name        String
+  order       Int
+  probability Int     @default(0) // 0-100, for weighted forecast
+
+  pipeline Pipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  deals    Deal[]
+
+  @@index([pipelineId])
+  @@map("stage")
+}
+
+model Deal {
+  id             String    @id @default(cuid())
+  organizationId String
+  title          String
+  // amounts stored in minor units (cents) to avoid float errors
+  amountCents    Int       @default(0)
+  currency       String    @default("EUR") // EUR | CHF
+  status         DealStatus @default(OPEN)
+  pipelineId     String
+  stageId        String
+  companyId      String?
+  contactId      String?
+  ownerId        String?
+  expectedCloseAt DateTime?
+  closedAt       DateTime?
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pipeline     Pipeline     @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
+  stage        Stage        @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  company      Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  activities   Activity[]
+
+  @@index([organizationId])
+  @@index([organizationId, stageId])
+  @@index([organizationId, status])
+  @@map("deal")
+}
+
+enum DealStatus {
+  OPEN
+  WON
+  LOST
+}
+
+model Activity {
+  id             String       @id @default(cuid())
+  organizationId String
+  type           ActivityType
+  subject        String
+  body           String?
+  dueAt          DateTime?
+  completedAt    DateTime?
+  contactId      String?
+  dealId         String?
+  authorId       String? // User.id
+
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contact      Contact?     @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  deal         Deal?        @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, dueAt])
+  @@map("activity")
+}
+
+enum ActivityType {
+  NOTE
+  CALL
+  EMAIL
+  MEETING
+  TASK
+}
+
+model Tag {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  color          String   @default("#6366f1")
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  contacts     ContactTag[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId])
+  @@map("tag")
+}
+
+model ContactTag {
+  contactId String
+  tagId     String
+
+  contact Contact @relation(fields: [contactId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([contactId, tagId])
+  @@map("contact_tag")
+}

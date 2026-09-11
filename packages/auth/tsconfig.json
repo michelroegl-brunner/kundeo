@@ -1,0 +1,9 @@
+{
+  "extends": "@kundeo/tsconfig/library.json",
+  "compilerOptions": {
+    "lib": ["ES2022", "DOM"],
+    "jsx": "react-jsx"
+  },
+  "include": ["src/**/*.ts", "src/**/*.tsx"],
+  "exclude": ["node_modules", "dist"]
+}

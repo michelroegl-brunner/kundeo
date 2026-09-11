@@ -1,0 +1,27 @@
+{
+  "name": "kundeo",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Open-source CRM for the DACH market — self-hostable, with a hosted option.",
+  "license": "AGPL-3.0-only",
+  "packageManager": "pnpm@11.1.2",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "lint": "turbo run lint",
+    "typecheck": "turbo run typecheck",
+    "format": "prettier --write \"**/*.{ts,tsx,md,json}\"",
+    "db:generate": "turbo run db:generate",
+    "db:migrate": "pnpm --filter @kundeo/db db:migrate",
+    "db:studio": "pnpm --filter @kundeo/db db:studio",
+    "db:seed": "pnpm --filter @kundeo/db db:seed"
+  },
+  "devDependencies": {
+    "prettier": "^3.4.2",
+    "turbo": "^2.3.3",
+    "typescript": "^5.7.3"
+  }
+}

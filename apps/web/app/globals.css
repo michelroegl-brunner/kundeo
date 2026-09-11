@@ -1,0 +1,25 @@
+@import "tailwindcss";
+@import "./brand-tokens.css";
+
+/* Map the Kundeo brand tokens onto Tailwind utilities (bg-brand, text-amber, …). */
+@theme {
+  --color-brand: var(--kundeo-indigo);
+  --color-brand-hover: var(--kundeo-indigo-600);
+  --color-brand-soft: var(--kundeo-indigo-100);
+  --color-ink: var(--kundeo-ink);
+  --color-amber: var(--kundeo-amber);
+  --color-amber-soft: var(--kundeo-amber-100);
+  --color-success: var(--kundeo-green);
+  --color-success-soft: var(--kundeo-green-100);
+  --color-cloud: var(--kundeo-cloud);
+  --color-slate-muted: var(--kundeo-slate);
+}
+
+:root {
+  color-scheme: light dark;
+}
+
+html,
+body {
+  height: 100%;
+}

@@ -1,0 +1,24 @@
+{
+  "name": "@kundeo/auth",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./client": "./src/client.ts",
+    "./next": "./src/next.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@kundeo/db": "workspace:*",
+    "better-auth": "^1.1.14"
+  },
+  "devDependencies": {
+    "@kundeo/tsconfig": "workspace:*",
+    "@types/node": "^22.20.2",
+    "typescript": "^5.7.3"
+  }
+}

@@ -1,0 +1,22 @@
+# Local development database. For a full self-host stack (app + db) a
+# production compose file will live in deploy/ once the app image is built.
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kundeo
+      POSTGRES_PASSWORD: kundeo
+      POSTGRES_DB: kundeo
+    ports:
+      - "5432:5432"
+    volumes:
+      - kundeo_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kundeo"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  kundeo_pgdata:

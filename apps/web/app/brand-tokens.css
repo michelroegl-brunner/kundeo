@@ -1,0 +1,37 @@
+/* Kundeo — Markenfarben / brand tokens
+   Nutzung: als CSS-Variablen einbinden und über var(--kundeo-*) referenzieren.
+   Für pulsora-core (dark-first) ist die Ink-Fläche der Default-Hintergrund. */
+
+:root {
+  /* Kernpalette */
+  --kundeo-indigo: #6C63FF; /* Primär / Marke, CTAs-Fläche, aktive Zustände */
+  --kundeo-ink:    #12132A; /* Dunkle Fläche, Text auf hell */
+  --kundeo-amber:  #FFB020; /* Akzent, Hervorhebungen, sekundäre CTAs */
+  --kundeo-green:  #22C08C; /* Finanzen / Erfolg / positive Zustände */
+  --kundeo-cloud:  #F6F7FB; /* Helle Fläche, Text auf dunkel */
+  --kundeo-slate:  #6B7280; /* Neutraler Text, Hilfslinien */
+
+  /* Abgeleitete Stufen (Hover / Flächen) */
+  --kundeo-indigo-600: #5A50F0;
+  --kundeo-indigo-100: #E9E7FF;
+  --kundeo-amber-100:  #FFF1D6;
+  --kundeo-green-100:  #D7F5EB;
+}
+
+/* ---- Tailwind (v3) extend snippet ----
+theme: {
+  extend: {
+    colors: {
+      kundeo: {
+        DEFAULT: '#6C63FF',
+        indigo:  '#6C63FF',
+        ink:     '#12132A',
+        amber:   '#FFB020',
+        green:   '#22C08C',
+        cloud:   '#F6F7FB',
+        slate:   '#6B7280',
+      },
+    },
+  },
+}
+-------------------------------------- */
