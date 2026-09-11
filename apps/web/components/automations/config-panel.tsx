@@ -364,6 +364,10 @@ export function ConfigPanel({
             <Field label="Webhook-URL" required hint="Profi-Funktion"><Input mono value={s("url")} onChange={(e) => set({ url: e.target.value })} placeholder="https://…" /></Field>
             <Switch label="Empfänger geprüft und bestätigt" checked={c.confirmed === true} onChange={(v) => set({ confirmed: v })} />
           </>
+        ) : step.type === "subflow" ? (
+          <Field label="Andere Automation" required hint="Name der Automation, die gestartet wird">
+            <Input value={s("workflow")} onChange={(e) => set({ workflow: e.target.value })} placeholder="z. B. Onboarding starten" />
+          </Field>
         ) : (
           <TokenField label="Text" multiline text={s("text")} tokens={arr("textTokens")} onText={(v) => set({ text: v })} onTokens={(t) => set({ textTokens: t })} />
         )}

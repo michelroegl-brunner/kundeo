@@ -9,14 +9,14 @@
  * connection — a system-level operation by design — then resumes each run inside
  * its own org via withOrg, where RLS applies again.
  *
- * Each tick also fires due schedule-triggered workflows (see ./schedules).
- * Relative-date triggers remain unhandled — they need date fields the schema
- * does not have yet.
+ * Each tick also fires due schedule- and relative-date-triggered workflows
+ * (see ./schedules). Relative triggers only fire against date fields the schema
+ * actually has (the deal close date); others are skipped, not faked.
  */
 import "server-only";
 import { prisma } from "@kundeo/db";
 import { resumeRun } from "./runner";
-import { runDueSchedules } from "./schedules";
+import { runDueSchedules, runDueRelative } from "./schedules";
 
 const TICK_MS = 60_000;
 const FIRST_TICK_MS = 10_000;
@@ -55,6 +55,7 @@ export function startTicker(): void {
   const tick = () => {
     void drainDueRuns().catch((err) => console.error("[automations] ticker error", err));
     void runDueSchedules().catch((err) => console.error("[automations] schedule error", err));
+    void runDueRelative().catch((err) => console.error("[automations] relative error", err));
   };
   const interval = setInterval(tick, TICK_MS);
   if (typeof interval.unref === "function") interval.unref();

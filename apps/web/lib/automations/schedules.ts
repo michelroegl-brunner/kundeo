@@ -111,3 +111,63 @@ export async function runDueSchedules(now: Date = new Date()): Promise<number> {
   }
   return started;
 }
+
+const RELATIVE_HOUR = 8; // relative-date sweeps run once a day, from 08:00
+
+/** Map a relative trigger's date field to a real Deal column, or null if none. */
+function mapDealDateColumn(field: string | undefined): "expectedCloseAt" | null {
+  if (!field) return null;
+  const f = field.toLowerCase();
+  // Only the deal close date exists today. Renewal/other dates aren't in the
+  // schema yet, so a trigger on them does not fire (rather than fire wrongly).
+  if (f.includes("abschluss") || f.includes("close")) return "expectedCloseAt";
+  return null;
+}
+
+/**
+ * Fire relative-date triggers ("N Tage vor einem Datum"). Runs once per day per
+ * workflow, fanning out to the deals whose mapped date lands on the target day.
+ * Triggers referencing a date the schema does not have are skipped, not faked.
+ */
+export async function runDueRelative(now: Date = new Date()): Promise<number> {
+  if (now.getHours() < RELATIVE_HOUR) return 0;
+  const startOfToday = new Date(now);
+  startOfToday.setHours(0, 0, 0, 0);
+
+  const workflows = await prisma.workflow.findMany({
+    where: { isActive: true, steps: { some: { kind: "TRIGGER", type: "relative" } } },
+    select: { id: true, organizationId: true, steps: { select: { kind: true, type: true, parentStepId: true, config: true } } },
+  });
+
+  let started = 0;
+  for (const wf of workflows) {
+    const trigger = wf.steps.find((s) => s.parentStepId === null && s.kind === "TRIGGER" && s.type === "relative");
+    if (!trigger) continue;
+    const cfg = (trigger.config ?? {}) as { field?: string; offsetDays?: number };
+    const column = mapDealDateColumn(cfg.field);
+    if (!column) continue;
+
+    // Once per day: skip if this workflow already ran today.
+    const ranToday = await prisma.workflowRun.findFirst({
+      where: { workflowId: wf.id, startedAt: { gte: startOfToday } },
+      select: { id: true },
+    });
+    if (ranToday) continue;
+
+    const offset = typeof cfg.offsetDays === "number" ? cfg.offsetDays : 0;
+    const target = new Date(startOfToday);
+    target.setDate(target.getDate() - offset); // offsetDays is negative for "before"
+    const targetEnd = new Date(target);
+    targetEnd.setDate(targetEnd.getDate() + 1);
+
+    const where = { [column]: { gte: target, lt: targetEnd } } as Prisma.DealWhereInput;
+    const ids = await withOrg(wf.organizationId, async (tx) =>
+      (await tx.deal.findMany({ where, select: { id: true }, take: FANOUT_CAP })).map((r) => r.id),
+    );
+    for (const id of ids) {
+      await startRun({ organizationId: wf.organizationId, workflowId: wf.id, recordType: "Deal", recordId: id });
+    }
+    started += ids.length;
+  }
+  return started;
+}

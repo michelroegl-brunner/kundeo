@@ -211,6 +211,7 @@ const REQUIRED_CONFIG: Record<string, string[]> = {
   "tag.add": ["tag"],
   assign: ["assignee"],
   webhook: ["url"],
+  subflow: ["workflow"],
   branch: ["condition"],
   filter: ["field"],
 };

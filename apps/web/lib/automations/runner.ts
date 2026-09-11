@@ -37,6 +37,7 @@ interface WalkState {
   order: number;
   suspend: { stepId: string; resumeAt: Date } | null;
   outbox: OutboxItem[];
+  depth: number;
 }
 
 const UNIT_MS: Record<string, number> = {
@@ -127,15 +128,14 @@ async function walkLane(state: WalkState, steps: FlowStep[]): Promise<Signal> {
         return "suspend";
       }
       case "ACTION": {
-        if (!state.loaded) {
-          await logStep(state, step, "SKIPPED", "Kein Datensatz für diese Aktion");
-          break;
-        }
+        // Record-less runs (org-level schedules) still execute; each executor
+        // decides whether it needs a record and skips itself with a reason.
         const outcome = await executeAction(step.type, {
           tx: state.tx,
           organizationId: state.organizationId,
           loaded: state.loaded,
           config: step.config,
+          depth: state.depth,
         });
         const stepRowId = await logStep(state, step, outcome.status, outcome.message, outcome.errorCode);
         if (outcome.sideEffect) state.outbox.push({ ...outcome.sideEffect, stepRowId });
@@ -213,6 +213,24 @@ async function callWebhook(url: string, payload: Record<string, unknown>): Promi
   }
 }
 
+async function startSubflowRun(
+  organizationId: string,
+  sub: NonNullable<PendingSideEffect["subflow"]>,
+): Promise<string> {
+  const wf = await withOrg(organizationId, (tx) =>
+    tx.workflow.findFirst({ where: { name: sub.workflowName, isActive: true }, select: { id: true } }),
+  );
+  if (!wf) throw new Error(`Automation „${sub.workflowName}“ nicht gefunden oder inaktiv`);
+  await startRun({
+    organizationId,
+    workflowId: wf.id,
+    recordType: sub.recordType as RecordType | null,
+    recordId: sub.recordId,
+    depth: sub.depth,
+  });
+  return `Automation „${sub.workflowName}“ gestartet`;
+}
+
 /**
  * Send the run's queued side-effects after its transaction has committed, then
  * update each step to the transport's real outcome. A failed send marks its step
@@ -228,6 +246,8 @@ async function flushOutbox(organizationId: string, runId: string, outbox: Outbox
         detail = (await getEmailSender().send(item.email)).detail;
       } else if (item.kind === "webhook" && item.webhook) {
         detail = await callWebhook(item.webhook.url, item.webhook.payload);
+      } else if (item.kind === "subflow" && item.subflow) {
+        detail = await startSubflowRun(organizationId, item.subflow);
       } else {
         continue;
       }
@@ -257,6 +277,8 @@ export interface StartRunParams {
   recordType: RecordType | null;
   recordId: string | null;
   triggeredByUserId?: string | null;
+  /** Nesting depth when started by a subflow action (0 for a top-level run). */
+  depth?: number;
 }
 
 /** Create and drive a fresh run for a matched trigger. */
@@ -293,6 +315,7 @@ export async function startRun(params: StartRunParams): Promise<void> {
       order: 0,
       suspend: null,
       outbox,
+      depth: params.depth ?? 0,
     };
     const signal = await walkLane(state, tree);
     await finalize(state, startedAt, signal);
@@ -335,6 +358,7 @@ export async function resumeRun(organizationId: string, runId: string): Promise<
       order: existing,
       suspend: null,
       outbox,
+      depth: 0, // resumed runs are treated as top-level for the subflow guard
     };
     const signal = await walkLane(state, tree);
     await finalize(state, startedAt, signal);

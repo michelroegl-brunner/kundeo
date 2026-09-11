@@ -13,7 +13,7 @@
 import type { Prisma } from "@kundeo/db";
 import type { EmailMessage } from "@/lib/email";
 import type { LoadedRecord } from "./records";
-import { contactEmailConsent } from "./records";
+import { contactEmailConsent, parseMoneyToCents } from "./records";
 
 type Tx = Prisma.TransactionClient;
 
@@ -24,10 +24,14 @@ export type StepStatus = "OK" | "ERROR" | "SKIPPED";
  * happens in the run transaction, the send happens after it commits.
  */
 export interface PendingSideEffect {
-  kind: "email" | "webhook";
+  kind: "email" | "webhook" | "subflow";
   email?: EmailMessage;
   webhook?: { url: string; payload: Record<string, unknown> };
+  subflow?: { workflowName: string; recordType: string | null; recordId: string | null; depth: number };
 }
+
+/** How deep automation-calls-automation may nest before it is refused. */
+export const MAX_SUBFLOW_DEPTH = 3;
 
 export interface ActionOutcome {
   status: StepStatus;
@@ -40,8 +44,11 @@ export interface ActionOutcome {
 interface ActionContext {
   tx: Tx;
   organizationId: string;
-  loaded: LoadedRecord;
+  /** Null on a record-less run (e.g. an org-level schedule). */
+  loaded: LoadedRecord | null;
   config: Record<string, unknown>;
+  /** Nesting depth of this run, for the subflow recursion guard. */
+  depth: number;
 }
 
 const str = (v: unknown): string | undefined => {
@@ -49,20 +56,23 @@ const str = (v: unknown): string | undefined => {
   return s.length ? s : undefined;
 };
 
-function dealId(loaded: LoadedRecord): string | null {
+function dealId(loaded: LoadedRecord | null): string | null {
+  if (!loaded) return null;
   if (loaded.type === "Deal") return loaded.data.id;
   if (loaded.type === "Task") return loaded.data.dealId ?? null;
   return null;
 }
 
-function contactId(loaded: LoadedRecord): string | null {
+function contactId(loaded: LoadedRecord | null): string | null {
+  if (!loaded) return null;
   if (loaded.type === "Contact") return loaded.data.id;
   if (loaded.type === "Deal" || loaded.type === "Task") return loaded.data.contactId ?? null;
   return null;
 }
 
 /** The contact an email would go to: the record itself, or its deal's/task's contact. */
-function recipientContact(loaded: LoadedRecord): { email?: string | null; emailConsent?: boolean } | null {
+function recipientContact(loaded: LoadedRecord | null): { email?: string | null; emailConsent?: boolean } | null {
+  if (!loaded) return null;
   if (loaded.type === "Contact") return loaded.data;
   if (loaded.type === "Deal" || loaded.type === "Task") return loaded.data.contact ?? null;
   return null;
@@ -139,8 +149,8 @@ async function callWebhookAction(ctx: ActionContext): Promise<ActionOutcome> {
   if (!url) return { status: "SKIPPED", message: "Keine Webhook-URL gesetzt" };
   if (!/^https?:\/\//i.test(url)) return { status: "ERROR", message: "Ungültige Webhook-URL", errorCode: "BAD_URL" };
   const payload: Record<string, unknown> = {
-    type: ctx.loaded.type,
-    id: ctx.loaded.data.id,
+    type: ctx.loaded?.type ?? null,
+    id: ctx.loaded?.data.id ?? null,
     organizationId: ctx.organizationId,
   };
   return {
@@ -151,7 +161,7 @@ async function callWebhookAction(ctx: ActionContext): Promise<ActionOutcome> {
 }
 
 async function moveDeal(ctx: ActionContext): Promise<ActionOutcome> {
-  if (ctx.loaded.type !== "Deal") return { status: "SKIPPED", message: "Kein Deal zum Verschieben" };
+  if (!ctx.loaded || ctx.loaded.type !== "Deal") return { status: "SKIPPED", message: "Kein Deal zum Verschieben" };
   const stageName = str(ctx.config.stage);
   if (!stageName) return { status: "SKIPPED", message: "Keine Zielphase gesetzt" };
   const stage = await ctx.tx.stage.findFirst({
@@ -189,10 +199,73 @@ async function assign(ctx: ActionContext): Promise<ActionOutcome> {
   const members = await ctx.tx.member.findMany({ select: { userId: true } });
   if (!members.length) return { status: "SKIPPED", message: "Keine Teammitglieder für die Zuweisung" };
   const pick = members[Math.floor(Math.random() * members.length)]!.userId;
-  if (ctx.loaded.type === "Deal") await ctx.tx.deal.update({ where: { id: ctx.loaded.data.id }, data: { ownerId: pick } });
-  else if (ctx.loaded.type === "Contact") await ctx.tx.contact.update({ where: { id: ctx.loaded.data.id }, data: { ownerId: pick } });
+  if (ctx.loaded?.type === "Deal") await ctx.tx.deal.update({ where: { id: ctx.loaded.data.id }, data: { ownerId: pick } });
+  else if (ctx.loaded?.type === "Contact") await ctx.tx.contact.update({ where: { id: ctx.loaded.data.id }, data: { ownerId: pick } });
   else return { status: "SKIPPED", message: "Datensatz kann nicht zugewiesen werden" };
   return { status: "OK", message: "Datensatz zugewiesen (Reihum)" };
+}
+
+/**
+ * Set a field on the Deal the run is about. Only a small, safe whitelist of
+ * fields is writable from an automation (never ids or ownership); an unknown or
+ * unsafe field is skipped with a reason.
+ */
+async function setField(ctx: ActionContext): Promise<ActionOutcome> {
+  if (!ctx.loaded || ctx.loaded.type !== "Deal") return { status: "SKIPPED", message: "Feld setzen nur für Deals verfügbar" };
+  const field = str(ctx.config.field);
+  const value = str(ctx.config.value);
+  if (!field) return { status: "SKIPPED", message: "Kein Feld gewählt" };
+  if (value == null) return { status: "SKIPPED", message: "Kein Wert gesetzt" };
+
+  if (field === "title") {
+    await ctx.tx.deal.update({ where: { id: ctx.loaded.data.id }, data: { title: value } });
+    return { status: "OK", message: `Titel gesetzt: „${value}“` };
+  }
+  if (field === "currency") {
+    if (value !== "EUR" && value !== "CHF") return { status: "ERROR", message: `Ungültige Währung „${value}“`, errorCode: "BAD_VALUE" };
+    await ctx.tx.deal.update({ where: { id: ctx.loaded.data.id }, data: { currency: value } });
+    return { status: "OK", message: `Währung gesetzt: ${value}` };
+  }
+  if (field === "amount") {
+    const cents = parseMoneyToCents(value);
+    if (cents == null) return { status: "ERROR", message: `Ungültiger Betrag „${value}“`, errorCode: "BAD_VALUE" };
+    await ctx.tx.deal.update({ where: { id: ctx.loaded.data.id }, data: { amountCents: cents } });
+    return { status: "OK", message: `Betrag gesetzt: ${value}` };
+  }
+  if (field === "stage") {
+    const stage = await ctx.tx.stage.findFirst({ where: { name: value, pipelineId: ctx.loaded.data.pipelineId }, select: { id: true } });
+    if (!stage) return { status: "ERROR", message: `Phase „${value}“ nicht gefunden`, errorCode: "STAGE_MISSING" };
+    await ctx.tx.deal.update({ where: { id: ctx.loaded.data.id }, data: { stageId: stage.id } });
+    return { status: "OK", message: `Phase gesetzt: „${value}“` };
+  }
+  // owner and anything else: not safe to set blindly from an automation.
+  return { status: "SKIPPED", message: `Feld „${field}“ kann nicht automatisch gesetzt werden` };
+}
+
+/**
+ * Start another automation for the same record. The actual start is deferred to
+ * the post-commit outbox (a run must not open a nested transaction), and a depth
+ * guard stops automations from calling each other without end.
+ */
+async function startSubflow(ctx: ActionContext): Promise<ActionOutcome> {
+  const name = str(ctx.config.workflow);
+  if (!name) return { status: "SKIPPED", message: "Keine Ziel-Automation gewählt" };
+  if (ctx.depth + 1 > MAX_SUBFLOW_DEPTH) {
+    return { status: "SKIPPED", message: `Maximale Verschachtelung erreicht (${MAX_SUBFLOW_DEPTH})` };
+  }
+  return {
+    status: "OK",
+    message: `Automation „${name}“ wird gestartet`,
+    sideEffect: {
+      kind: "subflow",
+      subflow: {
+        workflowName: name,
+        recordType: ctx.loaded?.type ?? null,
+        recordId: ctx.loaded?.data.id ?? null,
+        depth: ctx.depth + 1,
+      },
+    },
+  };
 }
 
 async function notify(ctx: ActionContext): Promise<ActionOutcome> {
@@ -204,9 +277,7 @@ async function notify(ctx: ActionContext): Promise<ActionOutcome> {
 
 /** Actions with no runtime executor yet — skipped honestly, never faked. */
 const NOT_YET: Record<string, string> = {
-  "field.set": "Feld setzen wird noch nicht ausgeführt",
   "record.create": "Datensatz anlegen wird noch nicht ausgeführt",
-  subflow: "Andere Automation starten wird noch nicht ausgeführt",
 };
 
 type Executor = (ctx: ActionContext) => Promise<ActionOutcome>;
@@ -220,6 +291,8 @@ const EXECUTORS: Record<string, Executor> = {
   assign,
   notify,
   webhook: callWebhookAction,
+  "field.set": setField,
+  subflow: startSubflow,
 };
 
 /** Run one ACTION step's executor, or skip with a truthful reason. */
