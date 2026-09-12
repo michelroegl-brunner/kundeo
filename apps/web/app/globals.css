@@ -391,3 +391,29 @@
     font-variant-numeric: tabular-nums;
   }
 }
+
+/* Mobile navigation drawer (components/app-shell.tsx). */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-left {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [class*="animation:fade-in"],
+  [class*="animation:slide-in-left"] {
+    animation: none !important;
+  }
+}

@@ -112,6 +112,25 @@ export function AppShell({
   const router = useRouter();
   const [chrome, setChrome] = useState<Chrome>({});
   const setChromeCb = useCallback((c: Chrome) => setChrome(c), []);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
+  // Close the mobile drawer whenever the route changes (nav tap or otherwise).
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+
+  // While the drawer is open, close on Escape and lock the body scroll.
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setMobileNavOpen(false);
+    document.addEventListener("keydown", onKey);
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.body.style.overflow = prevOverflow;
+    };
+  }, [mobileNavOpen]);
 
   const nav = buildNav(freeFinanceConnected);
   const routes: Record<string, string> = Object.fromEntries(
@@ -141,7 +160,14 @@ export function AppShell({
         </aside>
 
         <div className="flex min-w-0 flex-col overflow-hidden">
-          <header className="flex h-[var(--topbar-height)] flex-none items-center gap-4 border-b border-edge bg-surface-card px-6">
+          <header className="flex h-[var(--topbar-height)] flex-none items-center gap-4 border-b border-edge bg-surface-card px-4 md:px-6">
+            <IconButton
+              icon="menu"
+              label="Menü öffnen"
+              variant="ghost"
+              className="md:hidden"
+              onClick={() => setMobileNavOpen(true)}
+            />
             <div className="min-w-0 flex-1">
               {chrome.breadcrumb?.length ? (
                 <div className="mb-px flex items-center gap-[5px] text-2xs text-content-subtle">
@@ -166,12 +192,74 @@ export function AppShell({
             {chrome.actions}
           </header>
 
-          <main className="min-h-0 flex-1 overflow-y-auto p-6">
+          <main className="min-h-0 flex-1 overflow-y-auto p-4 md:p-6">
             <div className="mx-auto flex max-w-[var(--content-max)] flex-col gap-5">{children}</div>
           </main>
         </div>
+
+        <MobileNavDrawer
+          open={mobileNavOpen}
+          onClose={() => setMobileNavOpen(false)}
+          org={org}
+          user={user}
+          nav={nav}
+          activeId={activeId}
+          onSelect={(id) => routes[id] && router.push(routes[id])}
+          onSignOut={signOut}
+        />
       </div>
     </ChromeContext.Provider>
+  );
+}
+
+/**
+ * Slide-in navigation for mobile (< md), where the fixed sidebar is hidden.
+ * Mirrors the desktop sidebar — org switcher, nav, user row — as an overlay
+ * drawer so every route stays reachable by touch.
+ */
+function MobileNavDrawer({
+  open,
+  onClose,
+  org,
+  user,
+  nav,
+  activeId,
+  onSelect,
+  onSignOut,
+}: {
+  open: boolean;
+  onClose: () => void;
+  org: { name: string; slug: string };
+  user: { name: string; email: string };
+  nav: NavItem[];
+  activeId: string;
+  onSelect: (id: string) => void;
+  onSignOut: () => void;
+}) {
+  return (
+    <div className="md:hidden" role="dialog" aria-modal="true" aria-label="Navigation" hidden={!open}>
+      <button
+        type="button"
+        aria-label="Menü schließen"
+        onClick={onClose}
+        className="fixed inset-0 z-40 cursor-default bg-black/40 [animation:fade-in_120ms_ease-out]"
+      />
+      <aside className="fixed inset-y-0 left-0 z-50 flex w-[min(84vw,var(--sidebar-width))] flex-col border-r border-edge bg-surface-card [animation:slide-in-left_160ms_ease-out]">
+        <div className="flex items-center justify-between gap-2 px-3 pt-3">
+          <span className="min-w-0 flex-1">
+            <OrgSwitcher org={org} />
+          </span>
+          <IconButton icon="x" label="Menü schließen" variant="ghost" onClick={onClose} />
+        </div>
+        <SidebarNav
+          className="flex-1 overflow-y-auto pt-0"
+          activeId={activeId}
+          onSelect={onSelect}
+          items={nav}
+        />
+        <UserRow user={user} onSignOut={onSignOut} />
+      </aside>
+    </div>
   );
 }
 
