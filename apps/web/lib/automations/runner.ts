@@ -213,6 +213,36 @@ async function callWebhook(url: string, payload: Record<string, unknown>): Promi
   }
 }
 
+/**
+ * Persist a FreeFinance sync as a durable job. The network call happens later in
+ * the ticker (with retry/backoff), never here — the outbox only writes the row.
+ * runId/runStepId are soft references so the ticker can annotate the run log with
+ * the eventual outcome.
+ */
+async function enqueueFreeFinanceJob(
+  organizationId: string,
+  runId: string,
+  stepRowId: string,
+  ff: NonNullable<PendingSideEffect["freefinance"]>,
+): Promise<string> {
+  await withOrg(organizationId, (tx) =>
+    tx.freeFinanceSyncJob.create({
+      data: {
+        organizationId,
+        kind: ff.kind,
+        companyId: ff.companyId,
+        dealId: ff.dealId,
+        config: ff.config as Prisma.InputJsonValue,
+        runId,
+        runStepId: stepRowId,
+      },
+    }),
+  );
+  return ff.kind === "CUSTOMER_SYNC"
+    ? "In FreeFinance-Warteschlange eingereiht – Kunde wird synchronisiert"
+    : "In FreeFinance-Warteschlange eingereiht – Rechnung wird erstellt";
+}
+
 async function startSubflowRun(
   organizationId: string,
   sub: NonNullable<PendingSideEffect["subflow"]>,
@@ -248,6 +278,8 @@ async function flushOutbox(organizationId: string, runId: string, outbox: Outbox
         detail = await callWebhook(item.webhook.url, item.webhook.payload);
       } else if (item.kind === "subflow" && item.subflow) {
         detail = await startSubflowRun(organizationId, item.subflow);
+      } else if (item.kind === "freefinance" && item.freefinance) {
+        detail = await enqueueFreeFinanceJob(organizationId, runId, item.stepRowId, item.freefinance);
       } else {
         continue;
       }

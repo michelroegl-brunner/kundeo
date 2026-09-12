@@ -24,7 +24,8 @@ DECLARE
   tenant_tables text[] := ARRAY[
     'company', 'contact', 'pipeline', 'deal', 'activity', 'tag',
     'workflow', 'workflow_run', 'email_template',
-    'org_integration', 'external_ref', 'product', 'document'
+    'org_integration', 'external_ref', 'product', 'document',
+    'freefinance_sync_job'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

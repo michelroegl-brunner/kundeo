@@ -24,6 +24,8 @@ export interface NodeDef {
   consent?: boolean;
   /** Power-user actions (webhook) — flagged "Profi" and confirmed before use. */
   advanced?: boolean;
+  /** FreeFinance actions — shown only when the integration is connected. */
+  freefinance?: boolean;
 }
 
 export interface PaletteGroup {
@@ -77,6 +79,8 @@ export const PALETTE: PaletteGroup[] = [
       { type: "assign", kind: "ACTION", icon: "users", name: "Zuweisen", sentence: "Datensatz einer Person zuweisen" },
       { type: "webhook", kind: "ACTION", icon: "webhook", name: "Webhook aufrufen", sentence: "Einen Webhook aufrufen", advanced: true },
       { type: "subflow", kind: "ACTION", icon: "workflow", name: "Automation starten", sentence: "Eine andere Automation starten" },
+      { type: "freefinance.customer.sync", kind: "ACTION", icon: "refresh-cw", name: "Kunde synchronisieren", sentence: "Firma als Kunde in FreeFinance anlegen oder aktualisieren", freefinance: true },
+      { type: "freefinance.invoice.create", kind: "ACTION", icon: "receipt", name: "Rechnung erstellen", sentence: "Rechnung in FreeFinance aus dem Deal erzeugen", freefinance: true },
     ],
   },
   {
@@ -97,6 +101,17 @@ export const NODE_BY_TYPE: Record<string, NodeDef> = Object.fromEntries(
 /** A safe fallback so an unknown persisted type never renders blank. */
 export function nodeDef(type: string): NodeDef {
   return NODE_BY_TYPE[type] ?? { type, kind: "ACTION", icon: "workflow", name: type, sentence: type };
+}
+
+/**
+ * The palette a user may pick from. FreeFinance actions appear only when the
+ * integration is connected — without credentials the feature stays invisible,
+ * matching the nav gating. Persisted steps still render via `nodeDef`, so an
+ * already-saved FreeFinance step is never hidden retroactively.
+ */
+export function visiblePalette(freeFinanceConnected: boolean): PaletteGroup[] {
+  if (freeFinanceConnected) return PALETTE;
+  return PALETTE.map((g) => ({ ...g, items: g.items.filter((i) => !i.freefinance) }));
 }
 
 /** German field labels for the guided pickers / filter summaries. */
@@ -231,6 +246,8 @@ const REQUIRED_CONFIG: Record<string, string[]> = {
   assign: ["assignee"],
   webhook: ["url"],
   subflow: ["workflow"],
+  "freefinance.customer.sync": ["record"],
+  "freefinance.invoice.create": ["lineSource", "account", "vatRate"],
   relative: ["field"],
   branch: ["condition"],
   filter: ["field"],
@@ -280,6 +297,19 @@ export function stepSentence(type: string, config: unknown): string {
     case "record.create": {
       const rt = RECORD_TYPES.find((r) => r.value === s("recordType"));
       return rt ? `${rt.label} anlegen` : base;
+    }
+    case "freefinance.customer.sync": {
+      const rec = s("record");
+      if (rec === "contact") return "Kontakt des Deals in FreeFinance synchronisieren";
+      if (rec === "company") return "Firma des Deals in FreeFinance synchronisieren";
+      return base;
+    }
+    case "freefinance.invoice.create": {
+      const src = s("lineSource");
+      const finalize = c.finalize === true ? " · sofort finalisieren" : "";
+      if (src === "offer") return `Rechnung aus dem angenommenen Angebot erstellen${finalize}`;
+      if (src === "deal") return `Rechnung aus dem Deal-Betrag erstellen${finalize}`;
+      return base;
     }
     case "relative": {
       const df = RELATIVE_DATE_FIELDS.find((d) => d.value === s("field"));

@@ -51,10 +51,12 @@ export function FlowBuilder({
   workflow,
   initialSteps,
   emailTemplates = [],
+  freeFinanceConnected = false,
 }: {
   workflow: BuilderWorkflow;
   initialSteps: FlowStep[];
   emailTemplates?: EmailTemplateOption[];
+  freeFinanceConnected?: boolean;
 }) {
   const router = useRouter();
   const narrow = useNarrow();
@@ -346,7 +348,7 @@ export function FlowBuilder({
 
       {/* body */}
       <div className="grid min-h-0 flex-1" style={{ gridTemplateColumns: narrow ? "1fr" : "232px minmax(0,1fr) 344px" }}>
-        {narrow ? null : <Palette hasTrigger={hasTrigger} onAdd={(item) => insert(item, null)} onDragStart={setDrag} />}
+        {narrow ? null : <Palette hasTrigger={hasTrigger} freeFinanceConnected={freeFinanceConnected} onAdd={(item) => insert(item, null)} onDragStart={setDrag} />}
 
         <div
           className="relative min-w-0 overflow-auto px-6 pt-6"
@@ -398,13 +400,13 @@ export function FlowBuilder({
           panelOpen && selectedStep ? (
             <div className="absolute inset-0 z-50 flex justify-end" style={{ background: "var(--surface-overlay)" }} onClick={() => setPanelOpen(false)}>
               <div onClick={(e) => e.stopPropagation()} className="w-[min(380px,92%)] border-l border-edge bg-surface-card shadow-xl">
-                <ConfigPanel step={selectedStep} onChange={updateStep} onClose={() => setPanelOpen(false)} onDelete={remove} emailTemplates={emailTemplates} />
+                <ConfigPanel step={selectedStep} onChange={updateStep} onClose={() => setPanelOpen(false)} onDelete={remove} emailTemplates={emailTemplates} freeFinanceConnected={freeFinanceConnected} />
               </div>
             </div>
           ) : null
         ) : (
           <aside className="min-w-0 overflow-hidden border-l border-edge bg-surface-card">
-            <ConfigPanel step={selectedStep} onChange={updateStep} onClose={() => setSelected(null)} onDelete={remove} emailTemplates={emailTemplates} />
+            <ConfigPanel step={selectedStep} onChange={updateStep} onClose={() => setSelected(null)} onDelete={remove} emailTemplates={emailTemplates} freeFinanceConnected={freeFinanceConnected} />
           </aside>
         )}
       </div>
@@ -422,7 +424,7 @@ export function FlowBuilder({
         </div>
       ) : null}
 
-      <InsertDialog open={!!insertAt} onClose={() => setInsertAt(null)} onPick={(item) => insert(item, insertAt)} />
+      <InsertDialog open={!!insertAt} freeFinanceConnected={freeFinanceConnected} onClose={() => setInsertAt(null)} onPick={(item) => insert(item, insertAt)} />
       <TestRunDialog open={testOpen} onClose={() => setTestOpen(false)} steps={steps} />
 
       {toast ? (

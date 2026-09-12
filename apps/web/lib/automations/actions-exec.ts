@@ -14,6 +14,7 @@ import type { Prisma } from "@kundeo/db";
 import type { EmailMessage } from "@/lib/email";
 import { renderTemplate } from "@/lib/email/render-template";
 import { renderMarkdown } from "@/lib/email/markdown";
+import { isEnvConfigured } from "@/lib/freefinance/config";
 import type { LoadedRecord } from "./records";
 import { contactEmailConsent, parseMoneyToCents, templateValues } from "./records";
 
@@ -26,10 +27,21 @@ export type StepStatus = "OK" | "ERROR" | "SKIPPED";
  * happens in the run transaction, the send happens after it commits.
  */
 export interface PendingSideEffect {
-  kind: "email" | "webhook" | "subflow";
+  kind: "email" | "webhook" | "subflow" | "freefinance";
   email?: EmailMessage;
   webhook?: { url: string; payload: Record<string, unknown> };
   subflow?: { workflowName: string; recordType: string | null; recordId: string | null; depth: number };
+  /**
+   * A FreeFinance sync deferred to the durable job queue. The executor does only
+   * DB validation; the outbox creates a FreeFinanceSyncJob row and the ticker
+   * performs the network call outside any transaction, with retry/backoff.
+   */
+  freefinance?: {
+    kind: "CUSTOMER_SYNC" | "INVOICE_CREATE";
+    companyId: string | null;
+    dealId: string | null;
+    config: Record<string, unknown>;
+  };
 }
 
 /** How deep automation-calls-automation may nest before it is refused. */
@@ -385,6 +397,60 @@ async function createRecord(ctx: ActionContext): Promise<ActionOutcome> {
   return { status: "SKIPPED", message: `Datensatztyp „${kind}“ wird nicht unterstützt` };
 }
 
+/**
+ * Whether FreeFinance is connected for this org, checked on the run's own
+ * transaction (env-first, then the OrgIntegration row) so no nested withOrg is
+ * opened. The heavy resolution (decrypting the secret, network) is left to the
+ * ticker that processes the job — the executor only gates enqueuing.
+ */
+async function freeFinanceConnected(ctx: ActionContext): Promise<boolean> {
+  if (isEnvConfigured()) return true;
+  const row = await ctx.tx.orgIntegration.findFirst({
+    where: { provider: "freefinance", enabled: true },
+    select: { id: true },
+  });
+  return row != null;
+}
+
+/**
+ * Sync the triggering record's company to FreeFinance. The `record` config picks
+ * company vs. the deal's contact, but both resolve to the owning company (a
+ * FreeFinance customer is company-shaped). The network call is deferred to a
+ * FreeFinanceSyncJob; here we only validate and enqueue.
+ */
+async function freeFinanceCustomerSync(ctx: ActionContext): Promise<ActionOutcome> {
+  const cid = companyId(ctx.loaded);
+  if (!cid) return { status: "SKIPPED", message: "Kunde nicht übertragen: Pflichtfeld fehlt" };
+  if (!(await freeFinanceConnected(ctx))) return { status: "SKIPPED", message: "FreeFinance nicht verbunden" };
+  return {
+    status: "OK",
+    message: "Kunde wird an FreeFinance übertragen",
+    sideEffect: {
+      kind: "freefinance",
+      freefinance: { kind: "CUSTOMER_SYNC", companyId: cid, dealId: dealId(ctx.loaded), config: ctx.config },
+    },
+  };
+}
+
+/**
+ * Create a FreeFinance invoice from the triggering deal — either from its
+ * accepted offer or from the deal amount. Deferred to a FreeFinanceSyncJob; the
+ * executor validates the deal is present and the integration connected.
+ */
+async function freeFinanceInvoiceCreate(ctx: ActionContext): Promise<ActionOutcome> {
+  const did = dealId(ctx.loaded);
+  if (!did) return { status: "SKIPPED", message: "Rechnung nicht erstellt: kein Deal am Datensatz" };
+  if (!(await freeFinanceConnected(ctx))) return { status: "SKIPPED", message: "FreeFinance nicht verbunden" };
+  return {
+    status: "OK",
+    message: "Rechnung wird in FreeFinance erstellt",
+    sideEffect: {
+      kind: "freefinance",
+      freefinance: { kind: "INVOICE_CREATE", companyId: companyId(ctx.loaded), dealId: did, config: ctx.config },
+    },
+  };
+}
+
 async function notify(ctx: ActionContext): Promise<ActionOutcome> {
   const text = str(ctx.config.text) ?? "Automation-Benachrichtigung";
   // No internal notification channel exists yet; the run log is the record of it.
@@ -409,6 +475,8 @@ const EXECUTORS: Record<string, Executor> = {
   "field.set": setField,
   "record.create": createRecord,
   subflow: startSubflow,
+  "freefinance.customer.sync": freeFinanceCustomerSync,
+  "freefinance.invoice.create": freeFinanceInvoiceCreate,
 };
 
 /** Run one ACTION step's executor, or skip with a truthful reason. */

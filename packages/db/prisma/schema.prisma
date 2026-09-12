@@ -116,10 +116,11 @@ model Organization {
   emailTemplates EmailTemplate[]
 
   // tenant-scoped FreeFinance integration (additive, capability-gated layer)
-  orgIntegrations OrgIntegration[]
-  externalRefs    ExternalRef[]
-  products        Product[]
-  documents       Document[]
+  orgIntegrations     OrgIntegration[]
+  externalRefs        ExternalRef[]
+  products            Product[]
+  documents           Document[]
+  freeFinanceSyncJobs FreeFinanceSyncJob[]
 
   @@map("organization")
 }
@@ -656,4 +657,49 @@ enum PaymentStatus {
   OPEN
   PARTIAL
   PAID
+}
+
+// A durable queue row for the FreeFinance automation actions. An automation run
+// enqueues a job (DB-only, from the post-commit outbox) rather than calling the
+// API inline: network I/O must never run inside the run's transaction, and a
+// FreeFinance call can be slow or fail transiently. The ticker sweeps due jobs
+// and performs the sync outside any transaction, retrying with exponential
+// backoff until it succeeds or exhausts maxAttempts. runId/runStepId are soft
+// references back to the run log so the outcome can be written where the user
+// sees it.
+model FreeFinanceSyncJob {
+  id             String                   @id @default(cuid())
+  organizationId String
+  kind           FreeFinanceSyncJobKind
+  status         FreeFinanceSyncJobStatus @default(PENDING)
+  companyId      String? // CUSTOMER_SYNC target / the invoice's customer
+  dealId         String? // INVOICE_CREATE source deal
+  documentId     String? // the created invoice, once it exists
+  config         Json                     @default("{}") // finalize, account, vatRate, lineSource
+  attempts       Int                      @default(0)
+  maxAttempts    Int                      @default(5)
+  runAt          DateTime                 @default(now()) // next attempt (backoff)
+  lastError      String?
+  runId          String? // originating WorkflowRun (soft ref, no FK)
+  runStepId      String? // WorkflowRunStep to annotate (soft ref, no FK)
+  createdAt      DateTime                 @default(now())
+  updatedAt      DateTime                 @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  // The ticker sweeps due pending jobs: status PENDING with runAt <= now.
+  @@index([status, runAt])
+  @@map("freefinance_sync_job")
+}
+
+enum FreeFinanceSyncJobKind {
+  CUSTOMER_SYNC
+  INVOICE_CREATE
+}
+
+enum FreeFinanceSyncJobStatus {
+  PENDING
+  DONE
+  FAILED
 }

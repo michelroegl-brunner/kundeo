@@ -1,12 +1,14 @@
 import { notFound } from "next/navigation";
-import { scoped } from "@/lib/session";
+import { ensureActiveOrgId, scoped } from "@/lib/session";
 import { buildTree, type FlatStep } from "@/components/automations/catalogue";
 import { FlowBuilder } from "@/components/automations/flow-builder";
+import { isFreeFinanceConnected } from "@/lib/freefinance";
 
 export const dynamic = "force-dynamic";
 
 export default async function BuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const orgId = await ensureActiveOrgId();
 
   const { workflow, emailTemplates } = await scoped(async (db) => {
     const workflow = await db.workflow.findUnique({
@@ -22,6 +24,8 @@ export default async function BuilderPage({ params }: { params: Promise<{ id: st
   });
   if (!workflow) notFound();
 
+  const freeFinanceConnected = orgId ? await isFreeFinanceConnected(orgId) : false;
+
   const tree = buildTree(workflow.steps as FlatStep[]);
 
   // The builder is a full-height editor with its own top bar: break out of the
@@ -32,6 +36,7 @@ export default async function BuilderPage({ params }: { params: Promise<{ id: st
         workflow={{ id: workflow.id, name: workflow.name, isActive: workflow.isActive, version: workflow.version }}
         initialSteps={tree}
         emailTemplates={emailTemplates}
+        freeFinanceConnected={freeFinanceConnected}
       />
     </div>
   );

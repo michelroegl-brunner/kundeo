@@ -9,7 +9,7 @@ import { Badge } from "@/components/ui/badge";
 import { Tooltip } from "@/components/ui/tooltip";
 import { Dialog } from "@/components/ui/dialog";
 import { Field } from "@/components/ui/field";
-import { PALETTE, stepSentence, type NodeDef, type FlowStep } from "./catalogue";
+import { visiblePalette, stepSentence, type NodeDef, type FlowStep } from "./catalogue";
 
 /** Collapses the builder to a single column below 1180px (tablet). */
 export function useNarrow(bp = 1180) {
@@ -72,18 +72,22 @@ function PaletteItem({
 /** Left palette: grouped, searchable; click to append or drag onto a “+”. */
 export function Palette({
   hasTrigger,
+  freeFinanceConnected = false,
   onAdd,
   onDragStart,
 }: {
   hasTrigger: boolean;
+  freeFinanceConnected?: boolean;
   onAdd: (item: NodeDef) => void;
   onDragStart: (item: NodeDef | null) => void;
 }) {
   const [q, setQ] = useState("");
-  const groups = PALETTE.map((g) => ({
-    ...g,
-    items: g.items.filter((i) => i.name.toLowerCase().includes(q.toLowerCase())),
-  })).filter((g) => g.items.length);
+  const groups = visiblePalette(freeFinanceConnected)
+    .map((g) => ({
+      ...g,
+      items: g.items.filter((i) => i.name.toLowerCase().includes(q.toLowerCase())),
+    }))
+    .filter((g) => g.items.length);
 
   return (
     <div className="flex h-full min-h-0 flex-col border-r border-edge bg-surface-card">
@@ -120,15 +124,18 @@ export function Palette({
 /** Insert picker shown when a “+” is clicked (excludes triggers). */
 export function InsertDialog({
   open,
+  freeFinanceConnected = false,
   onClose,
   onPick,
 }: {
   open: boolean;
+  freeFinanceConnected?: boolean;
   onClose: () => void;
   onPick: (item: NodeDef) => void;
 }) {
   const [q, setQ] = useState("");
-  const groups = PALETTE.filter((g) => g.group !== "Auslöser")
+  const groups = visiblePalette(freeFinanceConnected)
+    .filter((g) => g.group !== "Auslöser")
     .map((g) => ({ ...g, items: g.items.filter((i) => i.name.toLowerCase().includes(q.toLowerCase())) }))
     .filter((g) => g.items.length);
 

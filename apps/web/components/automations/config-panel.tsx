@@ -18,6 +18,7 @@ import {
   isStepComplete,
   stepSentence,
   PALETTE,
+  visiblePalette,
   FIELDS,
   OPERATORS,
   TOKENS,
@@ -29,7 +30,20 @@ import {
 } from "./catalogue";
 
 const TRIGGERS = PALETTE.find((g) => g.group === "Auslöser")!.items;
-const ACTIONS = PALETTE.find((g) => g.group === "Aktionen")!.items;
+
+const FF_RECORDS = [
+  { value: "company", label: "Firma des Deals" },
+  { value: "contact", label: "Kontakt des Deals" },
+];
+const FF_LINE_SOURCES = [
+  { value: "offer", label: "Aus dem angenommenen Angebot" },
+  { value: "deal", label: "Aus dem Deal-Betrag" },
+];
+const FF_ON_ERROR = [
+  { value: "stop", label: "Automation anhalten" },
+  { value: "continue", label: "Mit dem nächsten Schritt fortfahren" },
+];
+const FF_VAT_RATES = ["20", "13", "10", "0"];
 
 const RECIPIENTS = [
   { value: "contact", label: "Der Kontakt am Deal" },
@@ -290,6 +304,7 @@ export function ConfigPanel({
   onClose,
   onDelete,
   emailTemplates = [],
+  freeFinanceConnected = false,
 }: {
   step: FlowStep | null;
   onChange: (next: FlowStep) => void;
@@ -297,7 +312,10 @@ export function ConfigPanel({
   onDelete: (id: string) => void;
   /** Org email templates the "E-Mail senden" action can select. */
   emailTemplates?: EmailTemplateOption[];
+  /** Gates the FreeFinance actions in the action picker. */
+  freeFinanceConnected?: boolean;
 }) {
+  const actions = visiblePalette(freeFinanceConnected).find((g) => g.group === "Aktionen")!.items;
   if (!step) {
     return (
       <div className="p-5">
@@ -431,7 +449,7 @@ export function ConfigPanel({
     body = (
       <>
         <Field label="Was soll passieren?" hint="Auswahl in Klartext, keine Formeln">
-          <Select value={step.type} onChange={(e) => setType(e.target.value)} options={ACTIONS.map((i) => ({ value: i.type, label: i.name }))} />
+          <Select value={step.type} onChange={(e) => setType(e.target.value)} options={actions.map((i) => ({ value: i.type, label: i.name }))} />
         </Field>
         {step.type === "deal.move" ? (
           <Field label="Zielphase" required><Select placeholder="Phase wählen" value={s("stage")} onChange={(e) => set({ stage: e.target.value })} options={STAGES} /></Field>
@@ -459,6 +477,47 @@ export function ConfigPanel({
           <Field label="Andere Automation" required hint="Name der Automation, die gestartet wird">
             <Input value={s("workflow")} onChange={(e) => set({ workflow: e.target.value })} placeholder="z. B. Onboarding starten" />
           </Field>
+        ) : step.type === "freefinance.customer.sync" ? (
+          <>
+            <Field label="Datensatz" required hint="Was in FreeFinance angelegt oder aktualisiert wird">
+              <Select placeholder="Datensatz wählen" value={s("record")} onChange={(e) => set({ record: e.target.value })} options={FF_RECORDS} />
+            </Field>
+            <div className="flex flex-col gap-1 rounded-md border border-edge bg-surface-page p-3">
+              <p className="text-xs font-medium text-content">Pflichtfelder am Datensatz</p>
+              <p className="text-2xs leading-normal text-content-secondary">
+                Firmenname und Land sind erforderlich, eine gültige E-Mail-Adresse wird von FreeFinance geprüft. Fehlt ein Feld, wird der Schritt übersprungen und im Protokoll vermerkt.
+              </p>
+            </div>
+            <Field label="Wenn die Übertragung fehlschlägt">
+              <Select value={s("onError", "continue")} onChange={(e) => set({ onError: e.target.value })} options={FF_ON_ERROR} />
+            </Field>
+          </>
+        ) : step.type === "freefinance.invoice.create" ? (
+          <>
+            <Field label="Positionen" required hint="Woraus die Rechnung entsteht">
+              <Select placeholder="Quelle wählen" value={s("lineSource")} onChange={(e) => set({ lineSource: e.target.value })} options={FF_LINE_SOURCES} />
+            </Field>
+            <div className="grid grid-cols-2 gap-3">
+              <Field label="Konto" required hint="Erlöskonto für den Deal-Betrag">
+                <Input mono value={s("account")} onChange={(e) => set({ account: e.target.value })} placeholder="z. B. 4000" />
+              </Field>
+              <Field label="USt" required>
+                <Select value={s("vatRate", "20")} onChange={(e) => set({ vatRate: e.target.value })} options={FF_VAT_RATES.map((r) => ({ value: r, label: `${r} %` }))} />
+              </Field>
+            </div>
+            {s("lineSource") === "deal" ? (
+              <p className="text-2xs text-content-muted">Der Deal-Betrag wird als eine Position „Produkt für den Deal-Betrag“ übernommen. Konto und USt gelten für diese Position.</p>
+            ) : null}
+            <Switch
+              label="Sofort finalisieren"
+              hint="Vergibt die Belegnummer und erzeugt das PDF. Ohne diese Option bleibt die Rechnung im Entwurf."
+              checked={c.finalize === true}
+              onChange={(v) => set({ finalize: v })}
+            />
+            <Field label="Wenn die Übertragung fehlschlägt">
+              <Select value={s("onError", "continue")} onChange={(e) => set({ onError: e.target.value })} options={FF_ON_ERROR} />
+            </Field>
+          </>
         ) : step.type === "record.create" ? (
           <>
             <Field label="Datensatztyp" required>
