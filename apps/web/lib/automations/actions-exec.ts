@@ -73,14 +73,14 @@ const str = (v: unknown): string | undefined => {
 function dealId(loaded: LoadedRecord | null): string | null {
   if (!loaded) return null;
   if (loaded.type === "Deal") return loaded.data.id;
-  if (loaded.type === "Task") return loaded.data.dealId ?? null;
+  if (loaded.type === "Task" || loaded.type === "Invoice") return loaded.data.dealId ?? null;
   return null;
 }
 
 function contactId(loaded: LoadedRecord | null): string | null {
   if (!loaded) return null;
   if (loaded.type === "Contact") return loaded.data.id;
-  if (loaded.type === "Deal" || loaded.type === "Task") return loaded.data.contactId ?? null;
+  if (loaded.type === "Deal" || loaded.type === "Task" || loaded.type === "Invoice") return loaded.data.contactId ?? loaded.data.deal?.contactId ?? null;
   return null;
 }
 
@@ -89,14 +89,16 @@ function companyId(loaded: LoadedRecord | null): string | null {
   if (loaded.type === "Company") return loaded.data.id;
   if (loaded.type === "Deal" || loaded.type === "Contact") return loaded.data.companyId ?? null;
   if (loaded.type === "Task") return loaded.data.contact?.companyId ?? loaded.data.deal?.companyId ?? null;
+  if (loaded.type === "Invoice") return loaded.data.companyId ?? loaded.data.deal?.companyId ?? null;
   return null;
 }
 
-/** The contact an email would go to: the record itself, or its deal's/task's contact. */
+/** The contact an email would go to: the record itself, or its deal's/task's/invoice's contact. */
 function recipientContact(loaded: LoadedRecord | null): { email?: string | null; emailConsent?: boolean } | null {
   if (!loaded) return null;
   if (loaded.type === "Contact") return loaded.data;
   if (loaded.type === "Deal" || loaded.type === "Task") return loaded.data.contact ?? null;
+  if (loaded.type === "Invoice") return loaded.data.contact ?? loaded.data.deal?.contact ?? null;
   return null;
 }
 

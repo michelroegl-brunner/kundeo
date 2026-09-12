@@ -20,6 +20,9 @@ const nextConfig: NextConfig = {
   output: "standalone",
   // Workspace packages ship raw TS/TSX; let Next compile them.
   transpilePackages: ["@kundeo/db", "@kundeo/auth"],
+  // pdfkit (Mahnung-PDF) reads its AFM font metrics from its own package at
+  // runtime; keep it external so those data files survive the standalone trace.
+  serverExternalPackages: ["pdfkit"],
 };
 
 export default nextConfig;

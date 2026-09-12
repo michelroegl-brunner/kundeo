@@ -51,6 +51,7 @@ export const PALETTE: PaletteGroup[] = [
       { type: "task.created", kind: "TRIGGER", icon: "list-checks", name: "Aufgabe angelegt", sentence: "Wenn eine Aufgabe angelegt wird" },
       { type: "task.completed", kind: "TRIGGER", icon: "circle-check", name: "Aufgabe erledigt", sentence: "Wenn eine Aufgabe erledigt wird" },
       { type: "task.overdue", kind: "TRIGGER", icon: "clock-alert", name: "Aufgabe überfällig", sentence: "Wenn eine Aufgabe überfällig wird" },
+      { type: "invoice.dunned", kind: "TRIGGER", icon: "bell-ring", name: "Mahnung versendet", sentence: "Wenn eine Mahnung an einen Kunden versendet wird" },
       { type: "schedule", kind: "TRIGGER", icon: "calendar-clock", name: "Zeitplan", sentence: "Nach einem festen Zeitplan" },
       { type: "relative", kind: "TRIGGER", icon: "calendar-days", name: "Vor einem Datum", sentence: "Eine bestimmte Zeit vor einem Datum" },
       { type: "inbound", kind: "TRIGGER", icon: "mail-open", name: "E-Mail-Eingang", sentence: "Wenn eine E-Mail im Postfach eingeht" },
@@ -160,6 +161,12 @@ export const FIELDS: Record<string, FieldDef[]> = {
     { value: "salutation", label: "Anrede", kind: "enum", options: ["Herr", "Frau", "Divers"] },
     { value: "position", label: "Position", kind: "text" },
     { value: "consent", label: "Einwilligung", kind: "bool" },
+  ],
+  Rechnung: [
+    { value: "amount", label: "Betrag", kind: "money" },
+    { value: "dunningLevel", label: "Mahnstufe", kind: "text" },
+    { value: "paymentStatus", label: "Zahlstatus", kind: "enum", options: ["OPEN", "PARTIAL", "PAID"] },
+    { value: "number", label: "Nummer", kind: "text" },
   ],
 };
 

@@ -71,9 +71,30 @@ legitimate-interest basis).
   mahnen", pause/resume) and Mahnung entries in the Verlauf
   (`lib/freefinance/detail.ts`, `invoices/dunning-actions.ts`).
 
-## Follow-ups (out of scope for v1)
+## Delivered follow-ups
 
-- Generate a dedicated Mahnung PDF (v1 attaches the original invoice PDF).
-- Automation trigger `invoice.overdue` + a `Document` `RecordType` so workflows
-  can react to Mahnstufen (needs `lib/automations/records.ts` changes).
-- Multi-process safety beyond the single-process self-host ticker.
+- **Dedicated Mahnung PDF** (`lib/dunning/pdf.ts`, pdfkit — pure Node, no
+  headless browser). It is the primary email attachment; the original
+  FreeFinance invoice PDF is attached as a best-effort secondary. pdfkit is in
+  `serverExternalPackages` so its font metrics survive the standalone trace.
+- **Automation trigger `invoice.dunned`** — emitted from the sweep via
+  `dispatchSystemEvent` (a request-free dispatch path added to
+  `lib/automations/events.ts`). `Invoice` is now a `RecordType`
+  (`lib/automations/records.ts`): a dunning run resolves the invoice's
+  company/contact/deal, so `email.send`, `task.create`, `tag.add`, `notify`
+  work, and a `Rechnung` filter set (Mahnstufe, Betrag, Zahlstatus, Nummer) is
+  available in the builder.
+- **Multi-process safety** — the atomic **guarded level bump** is the lease:
+  under concurrent ticks/instances only the update that advances `dunningLevel`
+  from the value it read commits (`count === 1`); the rest see `count === 0` and
+  bail, so no invoice is dunned twice. The `DunningRun` audit row is now written
+  in the *same* transaction as the bump (provisional `PENDING`, updated with the
+  email outcome after send), so a crash between claim and send can neither lose
+  the record nor re-escalate.
+
+## Remaining ideas
+
+- Surface `Rechnung` as a selectable filter entity in the builder UI (fields
+  exist; the entity picker still lists CRM records only).
+- A relative `invoice.overdue` trigger (fires once when an invoice first passes
+  its due date), distinct from `invoice.dunned` (fires per Mahnstufe).

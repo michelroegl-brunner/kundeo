@@ -14,7 +14,7 @@ import { FIELDS, type FilterClause, type FieldKind } from "@/components/automati
 import { formatDate, formatMoney } from "@/lib/format";
 
 /** English record type as stored on WorkflowRun.recordType. */
-export type RecordType = "Deal" | "Contact" | "Company" | "Task";
+export type RecordType = "Deal" | "Contact" | "Company" | "Task" | "Invoice";
 
 type Tx = Prisma.TransactionClient;
 
@@ -48,15 +48,29 @@ export async function loadRecord(
     });
     return data ? { type, data } : null;
   }
+  if (type === "Invoice") {
+    // A Document(kind=INVOICE). Its company/contact/deal are plain id columns
+    // (no Prisma relation), so resolve them manually and attach so conditions
+    // and actions can reach the billing party.
+    const doc = await tx.document.findFirst({ where: { id, kind: "INVOICE" } });
+    if (!doc) return null;
+    const [company, contact, deal] = await Promise.all([
+      doc.companyId ? tx.company.findUnique({ where: { id: doc.companyId } }) : Promise.resolve(null),
+      doc.contactId ? tx.contact.findUnique({ where: { id: doc.contactId } }) : Promise.resolve(null),
+      doc.dealId ? tx.deal.findFirst({ where: { id: doc.dealId }, include: { stage: true, company: true, contact: true } }) : Promise.resolve(null),
+    ]);
+    return { type, data: { ...doc, company, contact, deal } };
+  }
   const data = await tx.company.findFirst({ where: { id } });
   return data ? { type, data } : null;
 }
 
-const GERMAN_TO_TYPE: Record<string, RecordType> = { Deal: "Deal", Firma: "Company", Kontakt: "Contact" };
+const GERMAN_TO_TYPE: Record<string, RecordType> = { Deal: "Deal", Firma: "Company", Kontakt: "Contact", Rechnung: "Invoice" };
 
 function defaultEntity(type: RecordType): string {
   if (type === "Deal") return "Deal";
   if (type === "Company") return "Firma";
+  if (type === "Invoice") return "Rechnung";
   return "Kontakt"; // Contact and Task both default to contact-scoped conditions
 }
 
@@ -72,6 +86,9 @@ function entityObject(loaded: LoadedRecord, entity: string): Record<string, unkn
   if (loaded.type === "Task" && target === "Contact") return loaded.data.contact ?? null;
   if (loaded.type === "Task" && target === "Deal") return loaded.data.deal ?? null;
   if (loaded.type === "Task" && target === "Company") return loaded.data.contact?.company ?? loaded.data.deal?.company ?? null;
+  if (loaded.type === "Invoice" && target === "Company") return loaded.data.company ?? loaded.data.deal?.company ?? null;
+  if (loaded.type === "Invoice" && target === "Contact") return loaded.data.contact ?? loaded.data.deal?.contact ?? null;
+  if (loaded.type === "Invoice" && target === "Deal") return loaded.data.deal ?? null;
   return null;
 }
 
@@ -81,6 +98,12 @@ function fieldValue(obj: Record<string, unknown>, entity: string, field: string)
     if (field === "amount") return obj.amountCents; // minor units
     if (field === "stage") return (obj.stage as { name?: string } | null)?.name ?? null;
     if (field === "owner") return obj.ownerId ?? null;
+  }
+  if (entity === "Rechnung") {
+    if (field === "amount") return obj.totalCents; // minor units
+    if (field === "number") return obj.externalNumber ?? null;
+    if (field === "dunningLevel") return obj.dunningLevel ?? 0;
+    if (field === "paymentStatus") return obj.paymentStatus ?? null;
   }
   // Kontakt.consent maps to the recorded email-consent flag (DSGVO).
   if (entity === "Kontakt" && field === "consent") return obj.emailConsent === true;
@@ -168,6 +191,8 @@ function relatedObjects(loaded: LoadedRecord | null): {
   if (loaded.type === "Contact") return { contact: d, company: d.company ?? null, deal: null };
   if (loaded.type === "Company") return { contact: null, company: d, deal: null };
   if (loaded.type === "Deal") return { contact: d.contact ?? null, company: d.company ?? null, deal: d };
+  if (loaded.type === "Invoice")
+    return { contact: d.contact ?? d.deal?.contact ?? null, company: d.company ?? d.deal?.company ?? null, deal: d.deal ?? null };
   // Task
   return {
     contact: d.contact ?? null,

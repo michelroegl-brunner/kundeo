@@ -14,8 +14,10 @@
 import "server-only";
 import { prisma, withOrg, type Prisma } from "@kundeo/db";
 import { getEmailSender } from "@/lib/email";
+import { dispatchSystemEvent } from "@/lib/automations/events";
 import { renderTemplate } from "@/lib/email/render-template";
 import { getDocumentPdf, type DocumentAttachment } from "@/lib/freefinance/documents";
+import { renderMahnungPdf, type MahnungPdfData } from "./pdf";
 import { daysOverdue, isDunningDue, computeInterestCents, openCents, type DunningPolicyShape } from "./math";
 
 const BATCH_PER_ORG = 50;
@@ -71,7 +73,9 @@ interface ResolvedMessage {
   subject: string;
   text: string;
   templateName?: string;
-  /** FreeFinance ref for the courtesy PDF, fetched AFTER the transaction commits. */
+  /** Data for the Mahnung PDF, rendered AFTER the transaction commits. */
+  mahnung: MahnungPdfData;
+  /** FreeFinance ref for the original invoice PDF, fetched AFTER commit. */
   pdfRef: { externalId: string; number: string | null } | null;
 }
 
@@ -83,7 +87,8 @@ interface ResolvedMessage {
  */
 async function resolveMessage(
   tx: Prisma.TransactionClient,
-  invoice: { id: string; companyId: string | null; contactId: string | null; externalNumber: string | null; dueDate: Date | null; currency: string },
+  organizationId: string,
+  invoice: { id: string; companyId: string | null; contactId: string | null; externalNumber: string | null; issueDate: Date | null; dueDate: Date | null; currency: string },
   level: LevelRow,
   amounts: { openBeforeCents: number; feeCents: number; interestCents: number; totalCents: number; days: number },
 ): Promise<ResolvedMessage | null> {
@@ -95,7 +100,10 @@ async function resolveMessage(
   const to = contact?.email?.trim() ?? "";
   if (!to) return null;
 
-  const company = invoice.companyId ? await tx.company.findUnique({ where: { id: invoice.companyId }, select: { name: true } }) : null;
+  const [company, org] = await Promise.all([
+    invoice.companyId ? tx.company.findUnique({ where: { id: invoice.companyId }, select: { name: true } }) : Promise.resolve(null),
+    tx.organization.findUnique({ where: { id: organizationId }, select: { name: true } }),
+  ]);
   const tpl = level.emailTemplateId ? await tx.emailTemplate.findUnique({ where: { id: level.emailTemplateId } }) : null;
   const base = tpl ? { subject: tpl.subject, body: tpl.body } : fallbackBody(level.label);
 
@@ -112,12 +120,29 @@ async function resolveMessage(
   };
   const rendered = renderTemplate(base, values);
 
+  const mahnung: MahnungPdfData = {
+    orgName: org?.name ?? "",
+    levelLabel: level.label,
+    customerName: company?.name ?? "",
+    invoiceNumber: invoice.externalNumber ?? "",
+    invoiceDate: fmtDate(invoice.issueDate),
+    dueDate: fmtDate(invoice.dueDate),
+    daysOverdue: amounts.days,
+    currency: invoice.currency,
+    openCents: amounts.openBeforeCents,
+    feeCents: amounts.feeCents,
+    interestCents: amounts.interestCents,
+    totalCents: amounts.totalCents,
+    date: fmtDate(new Date()),
+  };
+
   const ref = await tx.externalRef.findFirst({ where: { provider: "freefinance", entityType: "invoice", entityId: invoice.id } });
   return {
     to,
     subject: rendered.subject,
     text: rendered.body,
     templateName: tpl?.name,
+    mahnung,
     pdfRef: ref?.externalId ? { externalId: ref.externalId, number: invoice.externalNumber } : null,
   };
 }
@@ -165,8 +190,24 @@ async function issueForInvoice(
     const days = inv.dueDate ? daysOverdue(inv.dueDate, now) : 0;
     const interestCents = computeInterestCents(open, nextLevel.interestBps, days);
     const amounts = { openBeforeCents: open, feeCents: nextLevel.feeCents, interestCents, totalCents: open + nextLevel.feeCents + interestCents, days };
-    const message = await resolveMessage(tx, inv, nextLevel, amounts);
-    return { state: "claimed" as const, inv, level: nextLevel, amounts, message };
+    const message = await resolveMessage(tx, organizationId, inv, nextLevel, amounts);
+
+    // Record the run atomically with the bump so a crash before the email can
+    // never lose the audit row or re-escalate. The email outcome is filled in
+    // afterwards; PENDING is the transient state until then.
+    const run = await tx.dunningRun.create({
+      data: {
+        organizationId,
+        documentId: inv.id,
+        level: nextLevel.level,
+        label: nextLevel.label,
+        feeCents: nextLevel.feeCents,
+        interestCents,
+        openCents: open,
+        emailStatus: "PENDING",
+      },
+    });
+    return { state: "claimed" as const, inv, level: nextLevel, amounts, message, runId: run.id };
   });
 
   if (claim.state === "skip") return { ok: false, message: claim.reason };
@@ -176,14 +217,23 @@ async function issueForInvoice(
   let emailStatus: "SENT" | "LOGGED" | "SKIPPED" = "SKIPPED";
   let detail = "Keine E-Mail-Adresse hinterlegt";
   if (claim.message) {
-    // The PDF is a courtesy attachment; a dunning must still go out if
-    // FreeFinance is momentarily unreachable or the invoice was never pushed.
-    let attachments: DocumentAttachment[] = [];
+    const attachments: DocumentAttachment[] = [];
+    // Primary attachment: the Mahnung letter, rendered in-process (no network).
+    try {
+      const bytes = await renderMahnungPdf(claim.message.mahnung);
+      const num = claim.message.mahnung.invoiceNumber ? `_${claim.message.mahnung.invoiceNumber.replace(/[^\w.\-]+/g, "_")}` : "";
+      attachments.push({ filename: `Mahnung${num}.pdf`, contentType: "application/pdf", bytes });
+    } catch (err) {
+      console.error("[dunning] Mahnung-PDF konnte nicht erzeugt werden", err);
+    }
+    // Secondary, courtesy attachment: the original FreeFinance invoice PDF. The
+    // Mahnung must still go out if FreeFinance is momentarily unreachable or the
+    // invoice was never pushed.
     if (claim.message.pdfRef) {
       try {
-        attachments = [await getDocumentPdf(organizationId, "invoice", claim.message.pdfRef.externalId, claim.message.pdfRef.number)];
+        attachments.push(await getDocumentPdf(organizationId, "invoice", claim.message.pdfRef.externalId, claim.message.pdfRef.number));
       } catch {
-        attachments = [];
+        /* best-effort */
       }
     }
     try {
@@ -203,21 +253,18 @@ async function issueForInvoice(
     }
   }
 
+  // Fill in the email outcome on the run that was recorded with the claim.
   await withOrg(organizationId, (tx) =>
-    tx.dunningRun.create({
-      data: {
-        organizationId,
-        documentId: claim.inv.id,
-        level: claim.level.level,
-        label: claim.level.label,
-        feeCents: claim.amounts.feeCents,
-        interestCents: claim.amounts.interestCents,
-        openCents: claim.amounts.openBeforeCents,
-        emailStatus,
-        detail,
-      },
-    }),
+    tx.dunningRun.update({ where: { id: claim.runId }, data: { emailStatus, detail } }),
   );
+
+  // Fire the automation trigger so workflows can react (follow-up task, team
+  // notification, tag). Best-effort: a failing automation must not fail the dun.
+  try {
+    await dispatchSystemEvent(organizationId, "invoice.dunned", { type: "Invoice", id: claim.inv.id }, { dunningLevel: claim.level.level });
+  } catch (err) {
+    console.error("[dunning] invoice.dunned dispatch failed", err);
+  }
 
   return { ok: true, level: claim.level.level, message: `${claim.level.label} versendet (${emailStatus === "SENT" ? "zugestellt" : emailStatus === "LOGGED" ? "im Protokoll" : "ohne Empfänger"})` };
 }

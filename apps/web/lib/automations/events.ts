@@ -31,7 +31,8 @@ export type TriggerKind =
   | "company.updated"
   | "task.created"
   | "task.completed"
-  | "task.overdue";
+  | "task.overdue"
+  | "invoice.dunned";
 
 export interface EventRecord {
   type: RecordType;
@@ -43,6 +44,8 @@ export interface EventMeta {
   tag?: string;
   /** For deal.stage: the stage the deal moved into. */
   stage?: string;
+  /** For invoice.dunned: the Mahnstufe that was issued. */
+  dunningLevel?: number;
 }
 
 interface TriggerStepRow {
@@ -113,6 +116,21 @@ async function dispatchEvent(
       console.error(`[automations] run failed workflow=${workflowId}`, err);
     }
   }
+}
+
+/**
+ * Dispatch a trigger event from a system context (the ticker/sweep), where
+ * there is no request scope, session or `after()`. Runs inline and awaits, so
+ * the caller should invoke it outside any transaction and guard it (a failing
+ * automation must not break the sweep). There is no acting user.
+ */
+export async function dispatchSystemEvent(
+  organizationId: string,
+  kind: TriggerKind,
+  record: EventRecord,
+  meta?: EventMeta,
+): Promise<void> {
+  await dispatchEvent(kind, record, { organizationId, userId: null }, meta);
 }
 
 /**
