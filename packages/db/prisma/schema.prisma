@@ -115,6 +115,12 @@ model Organization {
   // tenant-scoped email templates (referenced by the email.send automation action)
   emailTemplates EmailTemplate[]
 
+  // tenant-scoped FreeFinance integration (additive, capability-gated layer)
+  orgIntegrations OrgIntegration[]
+  externalRefs    ExternalRef[]
+  products        Product[]
+  documents       Document[]
+
   @@map("organization")
 }
 
@@ -497,4 +503,157 @@ enum WorkflowRunStepStatus {
   OK
   ERROR
   SKIPPED
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// FreeFinance integration (tenant-scoped, additive, capability-gated)
+//
+// Self-host works fully without this: with no credentials the feature is
+// invisible. Credentials resolve env-first (single-org self-host) → per-org
+// OrgIntegration row (hosted). The secret is stored as AES-GCM ciphertext, never
+// plaintext, and never in Organization.metadata (which is unencrypted and read
+// via the RLS-bypassing bare client). See docs/integrations/freefinance.md.
+// ───────────────────────────────────────────────────────────────────────────
+
+// Per-org integration credentials. Hosted multi-tenant layer; self-host may use
+// env instead and never create a row.
+model OrgIntegration {
+  id             String   @id @default(cuid())
+  organizationId String
+  provider       String // "freefinance"
+  baseUrl        String
+  clientId       String
+  clientSecret   String // AES-GCM ciphertext, never plaintext
+  mandant        String // numeric FreeFinance client id
+  enabled        Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider])
+  @@index([organizationId])
+  @@map("org_integration")
+}
+
+// Generic external-id mapping — keeps Company/Contact/Deal/Product/Document
+// provider-agnostic and gives every sync an idempotency key. entityType is one
+// of "customer" | "item" | "offer" | "invoice"; entityId is the Kundeo row id.
+model ExternalRef {
+  id             String   @id @default(cuid())
+  organizationId String
+  provider       String // "freefinance"
+  entityType     String
+  entityId       String
+  externalId     String // FreeFinance UUID
+  externalNumber String? // e.g. KDN00088307, A.2026T002, R.2026T004
+  syncedAt       DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, provider, entityType, entityId])
+  @@index([organizationId, provider, externalId])
+  @@map("external_ref")
+}
+
+// Kundeo offering catalogue ⇄ FreeFinance items (itm/items). Prices are integer
+// minor units; converted to decimals only at the FreeFinance boundary.
+model Product {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  description    String?
+  sku            String?
+  unitPriceCents Int      @default(0)
+  currency       String   @default("EUR")
+  vatRate        Int      @default(20) // percent; mapped to a tax_class_entry
+  unit           String? // FreeFinance unit_of_measure code, e.g. "H"
+  account        String? // per-product income-account (Konto) override
+  active         Boolean  @default(true)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@index([organizationId, active])
+  @@map("product")
+}
+
+// A kind-tagged business document: OFFER (Angebot) or INVOICE (Rechnung). One
+// table, one status machine and one PDF path serve both. FreeFinance remains the
+// system of record for the finalized number and PDF.
+model Document {
+  id             String         @id @default(cuid())
+  organizationId String
+  kind           DocumentKind
+  status         DocumentStatus @default(DRAFT)
+  companyId      String?
+  contactId      String?
+  dealId         String?
+  sourceOfferId  String? // invoice created from this offer
+  currency       String         @default("EUR")
+  netCents       Int            @default(0)
+  taxCents       Int            @default(0)
+  totalCents     Int            @default(0)
+  discountValue  Decimal?       @db.Decimal(12, 4) // document-level Rabatt
+  discountMode   String? // "RATE" | "CONSTANT"
+  issueDate      DateTime?
+  expirationDate DateTime? // offers
+  dueDate        DateTime? // invoices
+  paymentStatus  PaymentStatus  @default(OPEN)
+  paidCents      Int            @default(0)
+  externalNumber String? // A.2026T002 / R.2026T004
+  eInvoice       String         @default("NONE")
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  lines        DocumentLine[]
+
+  @@index([organizationId, kind, status])
+  @@map("document")
+}
+
+model DocumentLine {
+  id             String   @id @default(cuid())
+  documentId     String
+  position       Int
+  type           String   @default("ITEM") // "ITEM" | "TOTAL_DISCOUNT"
+  productId      String?
+  name           String
+  itemNumber     String?
+  quantity       Decimal  @db.Decimal(14, 4)
+  unit           String?
+  unitPriceCents Int
+  discountValue  Decimal? @db.Decimal(12, 4)
+  discountMode   String? // "RATE" | "CONSTANT"
+  account        String? // Konto override
+  vatRate        Int
+  netCents       Int
+  taxCents       Int
+  totalCents     Int
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId])
+  @@map("document_line")
+}
+
+enum DocumentKind {
+  OFFER
+  INVOICE
+}
+
+enum DocumentStatus {
+  DRAFT
+  STAGING
+  FINALIZED
+  CANCELLED
+}
+
+enum PaymentStatus {
+  OPEN
+  PARTIAL
+  PAID
 }

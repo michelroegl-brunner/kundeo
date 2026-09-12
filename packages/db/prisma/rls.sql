@@ -23,7 +23,8 @@ DECLARE
   t text;
   tenant_tables text[] := ARRAY[
     'company', 'contact', 'pipeline', 'deal', 'activity', 'tag',
-    'workflow', 'workflow_run', 'email_template'
+    'workflow', 'workflow_run', 'email_template',
+    'org_integration', 'external_ref', 'product', 'document'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP
@@ -66,3 +67,10 @@ CREATE POLICY tenant_isolation ON "workflow_run_step"
   USING (EXISTS (SELECT 1 FROM "workflow_run" r
                  WHERE r.id = "workflow_run_step"."runId"
                    AND r."organizationId" = app_current_org_id()));
+
+ALTER TABLE "document_line" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON "document_line";
+CREATE POLICY tenant_isolation ON "document_line"
+  USING (EXISTS (SELECT 1 FROM "document" d
+                 WHERE d.id = "document_line"."documentId"
+                   AND d."organizationId" = app_current_org_id()));
