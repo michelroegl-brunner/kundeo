@@ -16,6 +16,13 @@
  * never inside a run's database transaction.
  */
 
+/** A binary attachment (e.g. a FreeFinance offer/invoice PDF). */
+export interface EmailAttachment {
+  filename: string;
+  contentType: string;
+  bytes: Uint8Array;
+}
+
 export interface EmailMessage {
   organizationId: string;
   to: string;
@@ -26,6 +33,8 @@ export interface EmailMessage {
   html?: string;
   /** The named template the automation selected, for the log line. */
   templateName?: string;
+  /** Optional file attachments (e.g. a document PDF). */
+  attachments?: EmailAttachment[];
 }
 
 /** Which transport this process would use — for UI notices (e.g. the log warning). */
@@ -50,9 +59,10 @@ const env = (k: string): string | undefined => {
 /** Default sender: no SMTP required. Records the mail without delivering it. */
 class LogEmailSender implements EmailSender {
   async send(message: EmailMessage): Promise<EmailResult> {
+    const att = message.attachments?.length ? ` attachments=${message.attachments.map((a) => `${a.filename}(${a.bytes.byteLength}B)`).join(",")}` : "";
     console.info(
       `[email:log] org=${message.organizationId} to=${message.to} ` +
-        `template=${message.templateName ?? "—"} subject=${JSON.stringify(message.subject)}`,
+        `template=${message.templateName ?? "—"} subject=${JSON.stringify(message.subject)}${att}`,
     );
     return { delivered: false, detail: "E-Mail im Protokoll vermerkt (kein E-Mail-Versand konfiguriert)" };
   }
@@ -86,6 +96,9 @@ class SmtpEmailSender implements EmailSender {
       subject: message.subject,
       text: message.text,
       ...(message.html ? { html: message.html } : {}),
+      ...(message.attachments?.length
+        ? { attachments: message.attachments.map((a) => ({ filename: a.filename, content: Buffer.from(a.bytes), contentType: a.contentType })) }
+        : {}),
     });
     return { delivered: true, detail: `E-Mail über SMTP an ${message.to} gesendet` };
   }
@@ -131,6 +144,16 @@ class M365GraphEmailSender implements EmailSender {
               ? { contentType: "HTML", content: message.html }
               : { contentType: "Text", content: message.text },
             toRecipients: [{ emailAddress: { address: message.to } }],
+            ...(message.attachments?.length
+              ? {
+                  attachments: message.attachments.map((a) => ({
+                    "@odata.type": "#microsoft.graph.fileAttachment",
+                    name: a.filename,
+                    contentType: a.contentType,
+                    contentBytes: Buffer.from(a.bytes).toString("base64"),
+                  })),
+                }
+              : {}),
           },
           saveToSentItems: false,
         }),
