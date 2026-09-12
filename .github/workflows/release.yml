@@ -54,6 +54,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
+          push: true
           # amd64 only: the arm64 leg cross-builds under QEMU, where Next 15's
           # native SWC build worker crashes with SIGILL intermittently. Our deploy
           # target is amd64; re-add arm64 via a native arm64 runner if ever needed.
