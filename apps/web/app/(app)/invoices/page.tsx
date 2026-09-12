@@ -4,14 +4,16 @@ import { InvoicesView, type InvoiceRow, type InvoiceKpis, type ConvertibleOffer 
 export const dynamic = "force-dynamic";
 
 export default async function InvoicesPage() {
-  const { invoices, offers, companies } = await scoped(async (db) => {
+  const { invoices, offers, companies, dunningLabels } = await scoped(async (db) => {
     const [invoices, offers] = await Promise.all([
       db.document.findMany({ where: { kind: "INVOICE" }, orderBy: { createdAt: "desc" } }),
       db.document.findMany({ where: { kind: "OFFER", status: "FINALIZED" }, orderBy: { createdAt: "desc" } }),
     ]);
     const ids = [...new Set([...invoices, ...offers].map((d) => d.companyId).filter((x): x is string => !!x))];
     const companies = ids.length ? await db.company.findMany({ where: { id: { in: ids } }, select: { id: true, name: true } }) : [];
-    return { invoices, offers, companies };
+    const policy = await db.dunningPolicy.findFirst({ include: { levels: { orderBy: { level: "asc" } } } });
+    const dunningLabels = new Map((policy?.levels ?? []).map((l) => [l.level, l.label]));
+    return { invoices, offers, companies, dunningLabels };
   });
 
   const name = new Map(companies.map((c) => [c.id, c.name]));
@@ -29,6 +31,8 @@ export default async function InvoicesPage() {
     status: d.status,
     paymentStatus: d.paymentStatus,
     overdue: Boolean(d.status === "FINALIZED" && d.paymentStatus !== "PAID" && d.dueDate && d.dueDate.getTime() < now),
+    dunningLevel: d.dunningLevel,
+    dunningLabel: d.dunningLevel > 0 ? dunningLabels.get(d.dunningLevel) ?? "" : "",
   }));
 
   const kpis: InvoiceKpis = {

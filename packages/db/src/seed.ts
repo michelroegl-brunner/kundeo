@@ -93,6 +93,26 @@ async function main() {
 
   await seedAutomations(prisma, org.id, deal.id, owners.map((o) => o.id));
 
+  // Default Mahnwesen ladder: 3 Stufen, no Inkasso step. Zahlungserinnerung is
+  // fee- and interest-free; the two Mahnungen add a small Mahngebühr and the
+  // Austrian B2B statutory default of 9,2 % p.a. Verzugszinsen (920 bps).
+  await prisma.dunningPolicy.upsert({
+    where: { organizationId: org.id },
+    update: {},
+    create: {
+      organizationId: org.id,
+      graceDays: 3,
+      intervalDays: 7,
+      levels: {
+        create: [
+          { level: 1, label: "Zahlungserinnerung", feeCents: 0, interestBps: 0 },
+          { level: 2, label: "1. Mahnung", feeCents: 500, interestBps: 920 },
+          { level: 3, label: "2. Mahnung", feeCents: 1000, interestBps: 920 },
+        ],
+      },
+    },
+  });
+
   console.log(`Seeded organization "${org.name}" (${org.slug}).`);
 }
 

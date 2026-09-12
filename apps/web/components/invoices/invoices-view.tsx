@@ -25,6 +25,8 @@ export interface InvoiceRow {
   status: string;
   paymentStatus: string;
   overdue: boolean;
+  dunningLevel: number;
+  dunningLabel: string;
 }
 export interface InvoiceKpis {
   openCents: number;
@@ -65,6 +67,12 @@ export function InvoicesView({ rows, kpis, convertible }: { rows: InvoiceRow[]; 
       render: (r) => (r.dueDate ? <span className={r.overdue ? "text-danger" : "text-content-muted"}>{formatDate(new Date(r.dueDate))}</span> : "—"),
     },
     { key: "totalCents", label: "Gesamt", align: "right", mono: true, render: (r) => formatMoney(r.totalCents, r.currency) },
+    {
+      key: "dunningLevel",
+      label: "Mahnstufe",
+      align: "right",
+      render: (r) => (r.dunningLevel > 0 ? <Badge tone="warning">{r.dunningLabel || `Stufe ${r.dunningLevel}`}</Badge> : <span className="text-content-subtle">—</span>),
+    },
     { key: "paymentStatus", label: "Zahlstatus", align: "right", render: paymentBadge },
   ];
 

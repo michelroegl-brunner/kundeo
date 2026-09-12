@@ -28,6 +28,7 @@ import {
 } from "@/app/(app)/settings/actions";
 import { EmailTemplatesTab } from "@/components/settings/email-templates/email-templates-tab";
 import { FreeFinanceTab } from "@/components/settings/freefinance-tab";
+import { DunningTab, type DunningPolicyView } from "@/components/settings/dunning-tab";
 import type { EmailProvider } from "@/lib/email";
 import type { EmailTemplateItem, PreviewRecord } from "@/components/settings/email-templates/types";
 import type { FreeFinanceConfigPublic } from "@/lib/freefinance/config";
@@ -83,6 +84,7 @@ export interface SettingsViewProps {
   emailProvider: EmailProvider;
   previewRecords: PreviewRecord[];
   freeFinance: { config: FreeFinanceConfigPublic; defaults: FreeFinanceDefaults };
+  dunning: { policy: DunningPolicyView; templates: { id: string; name: string }[] };
 }
 
 export function SettingsView({
@@ -96,6 +98,7 @@ export function SettingsView({
   emailProvider,
   previewRecords,
   freeFinance,
+  dunning,
 }: SettingsViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState("org");
@@ -120,6 +123,7 @@ export function SettingsView({
     { id: "pipelines", label: "Pipelines", icon: "kanban" },
     { id: "emailTemplates", label: "E-Mail-Vorlagen", icon: "mail" },
     { id: "integrations", label: "Integrationen", icon: "plug" },
+    { id: "dunning", label: "Mahnwesen", icon: "clock-alert" },
     { id: "notifications", label: "Benachrichtigungen", icon: "bell" },
     { id: "instance", label: "Instanz", icon: "server" },
   ];
@@ -143,6 +147,8 @@ export function SettingsView({
         />
       ) : tab === "integrations" ? (
         <FreeFinanceTab config={freeFinance.config} defaults={freeFinance.defaults} pending={pending} run={run} />
+      ) : tab === "dunning" ? (
+        <DunningTab policy={dunning.policy} templates={dunning.templates} pending={pending} run={run} />
       ) : tab === "notifications" ? (
         <NotificationsTab prefs={prefs} pending={pending} run={run} />
       ) : (

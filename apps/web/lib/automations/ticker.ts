@@ -18,6 +18,7 @@ import { prisma, withOrg } from "@kundeo/db";
 import { resumeRun } from "./runner";
 import { runDueSchedules, runDueRelative } from "./schedules";
 import { processFreeFinanceJob } from "@/lib/freefinance/jobs";
+import { drainDueDunning } from "@/lib/dunning/sweep";
 
 const TICK_MS = 60_000;
 const FIRST_TICK_MS = 10_000;
@@ -135,6 +136,7 @@ export function startTicker(): void {
     void runDueSchedules().catch((err) => console.error("[automations] schedule error", err));
     void runDueRelative().catch((err) => console.error("[automations] relative error", err));
     void drainDueFreeFinanceJobs().catch((err) => console.error("[automations] freefinance job error", err));
+    void drainDueDunning().catch((err) => console.error("[dunning] sweep error", err));
   };
   const interval = setInterval(tick, TICK_MS);
   if (typeof interval.unref === "function") interval.unref();

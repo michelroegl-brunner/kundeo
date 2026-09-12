@@ -122,6 +122,10 @@ model Organization {
   documents           Document[]
   freeFinanceSyncJobs FreeFinanceSyncJob[]
 
+  // tenant-scoped Mahnwesen (dunning) — additive layer over invoices
+  dunningPolicies DunningPolicy[]
+  dunningRuns     DunningRun[]
+
   @@map("organization")
 }
 
@@ -606,13 +610,23 @@ model Document {
   paidCents      Int            @default(0)
   externalNumber String? // A.2026T002 / R.2026T004
   eInvoice       String         @default("NONE")
+  // Mahnwesen state (invoices only). dunningLevel is the highest Mahnstufe
+  // already sent (0 = none). dunningPausedUntil holds the ladder (manual
+  // Zahlungsvereinbarung). Payment facts (paidCents/paymentStatus) come from
+  // FreeFinance read-back and stop the ladder; Kundeo owns the escalation.
+  dunningLevel       Int       @default(0)
+  dunningPausedUntil DateTime?
+  lastDunnedAt       DateTime?
   createdAt      DateTime       @default(now())
   updatedAt      DateTime       @updatedAt
 
   organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   lines        DocumentLine[]
+  dunningRuns  DunningRun[]
 
   @@index([organizationId, kind, status])
+  // The dunning sweep selects finalized, unpaid invoices due for a Mahnung.
+  @@index([organizationId, kind, paymentStatus, dunningLevel])
   @@map("document")
 }
 
@@ -702,4 +716,76 @@ enum FreeFinanceSyncJobStatus {
   PENDING
   DONE
   FAILED
+}
+
+// ---------------------------------------------------------------------------
+// Mahnwesen (dunning) — an additive layer over finalized invoices.
+//
+// Kundeo owns the whole dunning process: the FreeFinance 2.0 API exposes no
+// reminder/Mahnung resource, so Kundeo computes Verzugszinsen + Mahngebühren,
+// escalates through a configurable ladder and sends each Mahnung by email
+// (attaching the original FreeFinance invoice PDF). The escalation runs on the
+// same in-process ticker as the automation delays and FreeFinance job sweep.
+// ---------------------------------------------------------------------------
+
+// One dunning configuration per organization. graceDays is the wait after the
+// invoice due date before the first Mahnstufe; intervalDays is the cadence
+// between subsequent Stufen. The concrete ladder lives in DunningLevel rows.
+model DunningPolicy {
+  id             String   @id @default(cuid())
+  organizationId String
+  isActive       Boolean  @default(true)
+  graceDays      Int      @default(3)
+  intervalDays   Int      @default(7)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  levels       DunningLevel[]
+
+  @@unique([organizationId])
+  @@map("dunning_policy")
+}
+
+// One rung of the ladder. level 1..N (1 = Zahlungserinnerung). feeCents is the
+// Mahngebühr for this Stufe; interestBps is the annual Verzugszinssatz in basis
+// points, applied pro-rata over the days overdue. Each Stufe may point at an
+// email template; a null template falls back to a built-in body.
+model DunningLevel {
+  id              String  @id @default(cuid())
+  policyId        String
+  level           Int
+  label           String
+  feeCents        Int     @default(0)
+  interestBps     Int     @default(0)
+  emailTemplateId String?
+
+  policy DunningPolicy @relation(fields: [policyId], references: [id], onDelete: Cascade)
+
+  @@unique([policyId, level])
+  @@index([policyId])
+  @@map("dunning_level")
+}
+
+// The audit trail: one row per Mahnung actually sent, shown in the invoice's
+// Verlauf. Carries the computed amounts and the email outcome so the history is
+// truthful even when no mail transport is configured (delivered = false).
+model DunningRun {
+  id             String   @id @default(cuid())
+  organizationId String
+  documentId     String
+  level          Int
+  label          String
+  feeCents       Int      @default(0)
+  interestCents  Int      @default(0)
+  openCents      Int      @default(0) // invoice open amount at the time of the run
+  emailStatus    String // "SENT" | "LOGGED" | "SKIPPED"
+  detail         String?
+  createdAt      DateTime @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  document     Document     @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, documentId])
+  @@map("dunning_run")
 }

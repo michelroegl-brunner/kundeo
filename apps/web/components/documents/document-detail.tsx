@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/app-shell";
 import { Card } from "@/components/ui/card";
@@ -13,7 +13,19 @@ import { PdfPanel } from "@/components/documents/pdf-panel";
 import { SendDialog } from "@/components/documents/send-dialog";
 import { CreateInvoiceDialog } from "@/components/documents/create-invoice-dialog";
 import { cancelDocument } from "@/app/(app)/offers/document-actions";
+import { dunInvoiceAction, setDunningPauseAction } from "@/app/(app)/invoices/dunning-actions";
 import { formatMoney, formatDate } from "@/lib/format";
+
+export interface DunningInfo {
+  level: number;
+  maxLevel: number;
+  currentLabel: string | null;
+  nextLabel: string | null;
+  nextDueAt: string | null;
+  pausedUntil: string | null;
+  active: boolean;
+  due: boolean;
+}
 
 export interface DetailLine {
   id: string;
@@ -53,6 +65,7 @@ export interface DocumentDetailProps {
   emailTemplates: { id: string; name: string }[];
   recipient: string;
   history: { at: string; text: string }[];
+  dunning?: DunningInfo | null;
 }
 
 const KIND_PLURAL = { offer: "Angebote", invoice: "Rechnungen" } as const;
@@ -179,6 +192,17 @@ export function DocumentDetail(props: DocumentDetailProps) {
             </Card>
           ) : null}
 
+          {props.kind === "invoice" && canDocActions && props.dunning && props.payment?.status !== "PAID" ? (
+            <DunningCard
+              id={props.id}
+              info={props.dunning}
+              onResult={(t) => {
+                setToast(t);
+                router.refresh();
+              }}
+            />
+          ) : null}
+
           {props.kind === "offer" && canDocActions ? (
             <Card title="Aktionen">
               <CreateInvoiceDialog offerId={props.id} onDone={() => router.refresh()} />
@@ -235,6 +259,73 @@ export function DocumentDetail(props: DocumentDetailProps) {
         </div>
       ) : null}
     </>
+  );
+}
+
+function DunningCard({ id, info, onResult }: { id: string; info: DunningInfo; onResult: (t: ToastProps) => void }) {
+  const [pending, start] = useTransition();
+  const paused = info.pausedUntil != null && new Date(info.pausedUntil).getTime() > Date.now();
+  const capped = info.level >= info.maxLevel;
+
+  const dun = () =>
+    start(async () => {
+      const r = await dunInvoiceAction(id);
+      onResult(r.ok ? { tone: "success", title: "Mahnung erstellt", description: r.message } : { tone: "danger", title: "Aktion fehlgeschlagen", description: r.error });
+    });
+
+  const setPause = (untilISO: string | null) =>
+    start(async () => {
+      const r = await setDunningPauseAction(id, untilISO);
+      onResult(r.ok ? { tone: "success", title: untilISO ? "Mahnlauf pausiert" : "Mahnlauf fortgesetzt" } : { tone: "danger", title: "Aktion fehlgeschlagen", description: r.error });
+    });
+
+  return (
+    <Card
+      title="Mahnwesen"
+      actions={
+        info.level > 0 ? (
+          <Badge tone={capped ? "danger" : "warning"}>{info.currentLabel ?? `Stufe ${info.level}`}</Badge>
+        ) : (
+          <Badge tone="neutral">Keine Mahnung</Badge>
+        )
+      }
+    >
+      {!info.active ? (
+        <p className="mb-2 font-sans text-2xs text-content-subtle">Das Mahnwesen ist deaktiviert — es werden keine automatischen Mahnungen versendet.</p>
+      ) : null}
+      <div className="flex flex-col gap-1.5">
+        <Row label="Erreichte Stufe" value={info.level > 0 ? `${info.level} / ${info.maxLevel}` : `0 / ${info.maxLevel}`} />
+        {capped ? (
+          <p className="font-sans text-2xs text-content-subtle">Maximale Mahnstufe erreicht — bitte manuell weiterverfolgen.</p>
+        ) : paused ? (
+          <Row label="Pausiert bis" value={formatDate(new Date(info.pausedUntil!))} />
+        ) : info.nextDueAt ? (
+          <Row label={`Nächste Stufe${info.nextLabel ? ` (${info.nextLabel})` : ""}`} value={info.due ? "fällig" : formatDate(new Date(info.nextDueAt))} />
+        ) : null}
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {!capped ? (
+          <Button size="sm" variant="secondary" iconLeft="send" loading={pending} onClick={dun}>
+            Jetzt mahnen
+          </Button>
+        ) : null}
+        {paused ? (
+          <Button size="sm" variant="ghost" iconLeft="play" loading={pending} onClick={() => setPause(null)}>
+            Fortsetzen
+          </Button>
+        ) : !capped ? (
+          <Button
+            size="sm"
+            variant="ghost"
+            iconLeft="pause"
+            loading={pending}
+            onClick={() => setPause(new Date(Date.now() + 30 * 86_400_000).toISOString())}
+          >
+            30 Tage pausieren
+          </Button>
+        ) : null}
+      </div>
+    </Card>
   );
 }
 

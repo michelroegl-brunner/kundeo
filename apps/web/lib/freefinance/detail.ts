@@ -1,5 +1,6 @@
 import { withOrg } from "@kundeo/db";
-import type { DocumentDetailProps, DetailLine } from "@/components/documents/document-detail";
+import type { DocumentDetailProps, DetailLine, DunningInfo } from "@/components/documents/document-detail";
+import { nextDunningDueAt, isDunningDue, openCents } from "@/lib/dunning/math";
 
 /** Assemble the shared DocumentDetail props for a finalized/cancelled document. */
 export async function loadDocumentDetail(organizationId: string, documentId: string): Promise<DocumentDetailProps> {
@@ -33,6 +34,31 @@ export async function loadDocumentDetail(organizationId: string, documentId: str
     if (doc.status === "FINALIZED") history.push({ at: doc.updatedAt.toISOString(), text: `Finalisiert${doc.externalNumber ? ` · ${doc.externalNumber}` : ""}` });
     if (doc.status === "CANCELLED") history.push({ at: doc.updatedAt.toISOString(), text: "Storniert" });
 
+    // Mahnwesen info + Verlauf (invoices only).
+    let dunning: DunningInfo | null = null;
+    if (kind === "invoice") {
+      const policy = await tx.dunningPolicy.findFirst({ include: { levels: { orderBy: { level: "asc" } } } });
+      const runs = await tx.dunningRun.findMany({ where: { documentId: doc.id }, orderBy: { createdAt: "asc" } });
+      for (const r of runs) history.push({ at: r.createdAt.toISOString(), text: `${r.label} versendet` });
+
+      if (policy) {
+        const maxLevel = policy.levels.length;
+        const level = doc.dunningLevel;
+        const open = openCents(doc.totalCents, doc.paidCents);
+        dunning = {
+          level,
+          maxLevel,
+          currentLabel: level > 0 ? policy.levels[level - 1]?.label ?? null : null,
+          nextLabel: level < maxLevel ? policy.levels[level]?.label ?? null : null,
+          nextDueAt: doc.dueDate ? nextDunningDueAt(doc.dueDate, level, policy).toISOString() : null,
+          pausedUntil: doc.dunningPausedUntil ? doc.dunningPausedUntil.toISOString() : null,
+          active: policy.isActive,
+          due: isDunningDue({ dueDate: doc.dueDate, openCents: open, currentLevel: level, maxLevel, pausedUntil: doc.dunningPausedUntil, policy, now: new Date() }),
+        };
+      }
+    }
+    history.sort((a, b) => a.at.localeCompare(b.at));
+
     return {
       id: doc.id,
       kind,
@@ -58,6 +84,7 @@ export async function loadDocumentDetail(organizationId: string, documentId: str
       emailTemplates: templates,
       recipient: contact?.email ?? "",
       history,
+      dunning,
     };
   });
 }

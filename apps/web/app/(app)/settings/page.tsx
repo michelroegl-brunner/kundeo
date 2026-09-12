@@ -47,7 +47,7 @@ export default async function SettingsPage() {
 
   const meta = parseMetadata(org?.metadata ?? null);
 
-  const { pipelines, templateItems, contacts } = await scoped(async (db) => {
+  const { pipelines, templateItems, contacts, dunningPolicy, dunningTemplates } = await scoped(async (db) => {
     const pipelines = await db.pipeline.findMany({
       orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
       include: {
@@ -64,7 +64,9 @@ export default async function SettingsPage() {
       take: 12,
       include: { company: true, deals: { orderBy: { updatedAt: "desc" }, take: 1, include: { stage: true } } },
     });
-    return { pipelines, templateItems, contacts };
+    const dunningPolicy = await db.dunningPolicy.findFirst({ include: { levels: { orderBy: { level: "asc" } } } });
+    const dunningTemplates = await db.emailTemplate.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } });
+    return { pipelines, templateItems, contacts, dunningPolicy, dunningTemplates };
   });
 
   const pipelineItems: PipelineItem[] = pipelines.map((p) => ({
@@ -153,6 +155,19 @@ export default async function SettingsPage() {
     eInvoice: typeof storedFf.eInvoice === "string" ? storedFf.eInvoice : "NONE",
   };
 
+  const dunningPolicyView = {
+    isActive: dunningPolicy?.isActive ?? true,
+    graceDays: dunningPolicy?.graceDays ?? 3,
+    intervalDays: dunningPolicy?.intervalDays ?? 7,
+    levels: dunningPolicy?.levels.length
+      ? dunningPolicy.levels.map((l) => ({ level: l.level, label: l.label, feeCents: l.feeCents, interestBps: l.interestBps, emailTemplateId: l.emailTemplateId }))
+      : [
+          { level: 1, label: "Zahlungserinnerung", feeCents: 0, interestBps: 0, emailTemplateId: null },
+          { level: 2, label: "1. Mahnung", feeCents: 500, interestBps: 920, emailTemplateId: null },
+          { level: 3, label: "2. Mahnung", feeCents: 1000, interestBps: 920, emailTemplateId: null },
+        ],
+  };
+
   return (
     <SettingsView
       org={orgSettings}
@@ -165,6 +180,7 @@ export default async function SettingsPage() {
       emailProvider={resolveEmailProvider()}
       previewRecords={previewRecords}
       freeFinance={{ config: freeFinanceConfig, defaults: freeFinanceDefaults }}
+      dunning={{ policy: dunningPolicyView, templates: dunningTemplates }}
     />
   );
 }

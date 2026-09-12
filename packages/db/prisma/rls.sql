@@ -25,7 +25,7 @@ DECLARE
     'company', 'contact', 'pipeline', 'deal', 'activity', 'tag',
     'workflow', 'workflow_run', 'email_template',
     'org_integration', 'external_ref', 'product', 'document',
-    'freefinance_sync_job'
+    'freefinance_sync_job', 'dunning_policy', 'dunning_run'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP
@@ -75,3 +75,11 @@ CREATE POLICY tenant_isolation ON "document_line"
   USING (EXISTS (SELECT 1 FROM "document" d
                  WHERE d.id = "document_line"."documentId"
                    AND d."organizationId" = app_current_org_id()));
+
+-- Dunning levels are scoped via their parent policy.
+ALTER TABLE "dunning_level" ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS tenant_isolation ON "dunning_level";
+CREATE POLICY tenant_isolation ON "dunning_level"
+  USING (EXISTS (SELECT 1 FROM "dunning_policy" p
+                 WHERE p.id = "dunning_level"."policyId"
+                   AND p."organizationId" = app_current_org_id()));
