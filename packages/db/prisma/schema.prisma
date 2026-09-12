@@ -126,6 +126,9 @@ model Organization {
   dunningPolicies DunningPolicy[]
   dunningRuns     DunningRun[]
 
+  // MCP access — bearer keys that let external agents reach this org's CRM data
+  mcpApiKeys McpApiKey[]
+
   @@map("organization")
 }
 
@@ -788,4 +791,38 @@ model DunningRun {
 
   @@index([organizationId, documentId])
   @@map("dunning_run")
+}
+
+// ───────────────────────────────────────────────────────────────────────────
+// MCP (Model Context Protocol) — bearer keys for external agents
+//
+// A key authorizes an external MCP client (Claude Cowork, Claude Desktop, …) to
+// reach a single organization's CRM data through /api/mcp. The plaintext token
+// is shown once at creation; only its SHA-256 hash is stored.
+//
+// Unlike the CRM tables, this is auth *infrastructure*, not tenant data: the
+// endpoint must resolve a token to its organization BEFORE any org context
+// exists, so the lookup runs on the bare client (like Better Auth's own
+// user/session/organization tables). It is therefore deliberately NOT placed
+// under Row-Level Security (see prisma/rls.sql) — the management UI scopes it
+// explicitly by organizationId and gates it on an admin role instead. Every
+// query the resolved key then makes into CRM tables still goes through
+// withOrg(), so RLS applies to the actual data access.
+model McpApiKey {
+  id              String    @id @default(cuid())
+  organizationId  String
+  name            String
+  keyHash         String    @unique // sha256 hex of the bearer token
+  keyPrefix       String // display hint, e.g. "kundeo_mcp_1a2b3c4d"
+  createdByUserId String? // User.id of the creator (soft ref, like ownerId)
+  scope           String    @default("read_write") // "read_only" | "read_write"
+  lastUsedAt      DateTime?
+  expiresAt       DateTime?
+  revokedAt       DateTime?
+  createdAt       DateTime  @default(now())
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId])
+  @@map("mcp_api_key")
 }
