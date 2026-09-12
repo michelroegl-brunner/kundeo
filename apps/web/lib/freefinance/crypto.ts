@@ -6,20 +6,20 @@ import { createCipheriv, createDecipheriv, randomBytes, createHash } from "node:
  * self-describing: `v1:{iv}:{tag}:{data}`, all base64. Never log the key or the
  * plaintext.
  *
- * Self-host without the env set falls back to a warning + a machine-derived key
- * so a single-instance deployment still works; hosted MUST set the env.
+ * There is no fallback key: if the env is unset we fail closed rather than
+ * encrypt under a source-code constant (which, in an open-source build, is a
+ * globally-known key and would leave the secret effectively plaintext). Both
+ * self-host and hosted MUST set `KUNDEO_ENCRYPTION_KEY` before storing DB-backed
+ * credentials. Env-pinned FreeFinance credentials never reach this module.
  */
 const VERSION = "v1";
 
 function key(): Buffer {
   const raw = process.env.KUNDEO_ENCRYPTION_KEY?.trim();
   if (raw) return createHash("sha256").update(raw).digest();
-  // Fallback: derive from a stable-ish per-instance value. Rotating this makes
-  // existing ciphertexts unreadable — intended only for single self-host use.
-  console.warn(
-    "[freefinance] KUNDEO_ENCRYPTION_KEY not set — using a derived fallback key. Set it for a stable, portable secret store.",
+  throw new Error(
+    "KUNDEO_ENCRYPTION_KEY ist nicht gesetzt. Setze einen zufälligen Wert (z. B. `openssl rand -base64 32`), um FreeFinance-Zugangsdaten verschlüsselt zu speichern.",
   );
-  return createHash("sha256").update("kundeo:freefinance:fallback").digest();
 }
 
 export function encryptSecret(plaintext: string): string {

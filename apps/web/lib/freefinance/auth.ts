@@ -1,5 +1,6 @@
 import type { FreeFinanceConfig } from "./config";
 import { FreeFinanceApiError } from "./errors";
+import { assertPublicHttpUrl } from "@/lib/automations/url-guard";
 
 /**
  * OIDC client-credentials token handling. Access tokens live ~300s with no
@@ -23,10 +24,16 @@ async function tokenEndpoint(baseUrl: string): Promise<string> {
   const res = await fetch(`${baseUrl}/api/2.0/auth/issuer`, {
     headers: { accept: "application/json" },
     signal: AbortSignal.timeout(10_000),
+    redirect: "manual",
   });
   if (!res.ok) throw new FreeFinanceApiError(res.status, null, "Issuer konnte nicht ermittelt werden");
   const json = (await res.json()) as { url: string };
   const endpoint = `${json.url.replace(/\/+$/, "")}/protocol/openid-connect/token`;
+  // The issuer URL is read from the discovery response, not from our already
+  // validated baseUrl, so a hostile FreeFinance host could point it at an
+  // internal target. Guard host+protocol against SSRF before we POST the
+  // client credentials to it.
+  await assertPublicHttpUrl(endpoint);
   issuerCache.set(baseUrl, endpoint);
   return endpoint;
 }

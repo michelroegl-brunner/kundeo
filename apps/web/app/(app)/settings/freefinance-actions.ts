@@ -1,8 +1,10 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { headers } from "next/headers";
+import { auth } from "@kundeo/auth";
 import { prisma } from "@kundeo/db";
-import { ensureActiveOrgId, scoped } from "@/lib/session";
+import { ensureActiveOrgId, requireOrgRole, scoped } from "@/lib/session";
 import { getFreeFinanceClient, isFreeFinanceConnected } from "@/lib/freefinance";
 import { encryptSecret } from "@/lib/freefinance/crypto";
 import { isEnvConfigured } from "@/lib/freefinance/config";
@@ -34,6 +36,11 @@ export async function saveFreeFinanceConnection(
 ): Promise<ActionResult> {
   if (isEnvConfigured()) {
     return { ok: false, error: "Zugangsdaten aus der Umgebung haben Vorrang und können hier nicht überschrieben werden." };
+  }
+  try {
+    await requireOrgRole("admin");
+  } catch (e) {
+    return fail(e, "Keine Berechtigung für diese Aktion.");
   }
   const baseUrl = input.baseUrl.trim().replace(/\/+$/, "");
   const clientId = input.clientId.trim();
@@ -125,6 +132,7 @@ export async function testFreeFinanceConnection(): Promise<
 /** Remove the per-org credentials (env-based credentials, if any, remain). */
 export async function disconnectFreeFinance(): Promise<ActionResult> {
   try {
+    await requireOrgRole("admin");
     await scoped(async (db) => {
       await db.orgIntegration.deleteMany({ where: { provider: PROVIDER } });
     });
@@ -148,6 +156,7 @@ export async function saveFreeFinanceDefaults(defaults: FreeFinanceDefaults): Pr
   try {
     const orgId = await ensureActiveOrgId();
     if (!orgId) return { ok: false, error: "Keine aktive Organisation." };
+    await requireOrgRole("admin");
     const org = await prisma.organization.findUnique({ where: { id: orgId }, select: { metadata: true } });
     let meta: Record<string, unknown> = {};
     try {
@@ -155,8 +164,12 @@ export async function saveFreeFinanceDefaults(defaults: FreeFinanceDefaults): Pr
     } catch {
       meta = {};
     }
-    meta.freefinance = defaults;
-    await prisma.organization.update({ where: { id: orgId }, data: { metadata: JSON.stringify(meta) } });
+    // Write through Better Auth so the org-update permission is enforced (and we
+    // don't mutate the organization row on the bare, RLS-bypassing client).
+    await auth.api.updateOrganization({
+      body: { organizationId: orgId, data: { metadata: { ...meta, freefinance: defaults } } },
+      headers: await headers(),
+    });
     revalidatePath("/settings");
     return { ok: true };
   } catch (e) {
