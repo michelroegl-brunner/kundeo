@@ -1,10 +1,15 @@
 name: Release
 
 # Publishes the production Docker image to GHCR and the native release tarball
-# as release artifacts. Triggers on a version tag (v*) or a published GitHub
-# release.
+# as release artifacts.
+#
+# - Push to main: rebuild and push the image as :latest (+ :sha-<commit>), so
+#   self-hosters tracking :latest always follow the tip of main. No tarball.
+# - Version tag (v*) or published release: also tag the image :X.Y.Z / :X.Y for
+#   pinning, and build + attach the native tarball to the release.
 on:
   push:
+    branches: ["main"]
     tags: ["v*"]
   release:
     types: [published]
@@ -57,7 +62,9 @@ jobs:
           cache-to: type=gha,mode=max
 
   # ─── Native release tarball → release assets ───────────────────────────────
+  # Only for tags / releases — a plain push to main just refreshes the image.
   tarball:
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'release'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
