@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Card } from "@/components/ui/card";
 import { Tabs } from "@/components/ui/tabs";
@@ -146,7 +147,25 @@ export function SettingsView({
           run={run}
         />
       ) : tab === "integrations" ? (
-        <FreeFinanceTab config={freeFinance.config} defaults={freeFinance.defaults} pending={pending} run={run} />
+        <div className="flex flex-col gap-4">
+          <FreeFinanceTab config={freeFinance.config} defaults={freeFinance.defaults} pending={pending} run={run} />
+          <Card
+            title="MCP-Zugriff"
+            subtitle="KI-Agenten (z. B. Claude Cowork) mit den CRM-Daten verbinden."
+            actions={
+              <Link href="/settings/mcp">
+                <Button variant="secondary" size="sm" iconRight="arrow-right">
+                  Verwalten
+                </Button>
+              </Link>
+            }
+          >
+            <p className="text-sm text-content-secondary">
+              Erstelle organisationsgebundene Schlüssel, mit denen externe Agenten über das Model
+              Context Protocol auf Kontakte, Firmen, Deals und Aktivitäten zugreifen.
+            </p>
+          </Card>
+        </div>
       ) : tab === "dunning" ? (
         <DunningTab policy={dunning.policy} templates={dunning.templates} pending={pending} run={run} />
       ) : tab === "notifications" ? (

@@ -108,6 +108,28 @@ Credentials resolve **env-first** (self-host, single org) → per-org row (hoste
 secret encrypted at rest). See [`docs/integrations/freefinance.md`](./docs/integrations/freefinance.md)
 for the full design.
 
+### MCP access for AI agents (optional)
+Connect AI agents (Claude Cowork, Claude Desktop, …) to a workspace's CRM data
+over the [Model Context Protocol](https://modelcontextprotocol.io). A remote MCP
+server is exposed at **`POST /api/mcp`** (Streamable HTTP transport), with tools
+for contacts, companies, deals, pipelines and activities.
+
+- **Self-host first, no external service** — access is granted with
+  per-organization **bearer keys** created under *Einstellungen → Integrationen →
+  MCP-Zugriff*. The plaintext token is shown once; only its SHA-256 hash is
+  stored. Send it as `Authorization: Bearer kundeo_mcp_…`.
+- **Tenant-isolated** — a key is bound to one organization and every tool call
+  runs through `withOrg()`, so Postgres Row-Level Security applies to all data
+  the agent touches, exactly as in the app.
+- **Scoped** — a key is `read_only` or `read_write`; read-only keys never see or
+  invoke the write tools.
+- **Automations fire** — records created via MCP dispatch the same triggers
+  (`contact.created`, `deal.created`, `task.created`, …) as the UI.
+
+Point a client at `${BETTER_AUTH_URL}/api/mcp` with the bearer token. See
+[`docs/integrations/mcp.md`](./docs/integrations/mcp.md) for the tool list and
+client setup.
+
 ---
 
 ## Quick start (local dev)
