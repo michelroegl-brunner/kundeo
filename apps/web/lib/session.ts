@@ -1,7 +1,8 @@
+import { randomUUID } from "node:crypto";
 import { cache } from "react";
 import { headers } from "next/headers";
 import { auth } from "@kundeo/auth";
-import { withOrg } from "@kundeo/db";
+import { prisma, withOrg } from "@kundeo/db";
 
 /** Reads the current Better Auth session on the server, or null. */
 export async function getSession() {
@@ -53,8 +54,9 @@ export async function requireOrgRole(min: OrgRole): Promise<void> {
  * Ensures the caller has an active organization and returns its id.
  *
  * This is the one place edition behaviour diverges:
- *  - self-hosted: the first sign-in auto-creates the single org and the user
- *    becomes its owner.
+ *  - self-hosted: the first sign-in bootstraps the single org (that user becomes
+ *    its owner). Later sign-ins that arrive through Microsoft Entra ID join that
+ *    same org as members — see joinOrCreateSelfHostOrg.
  *  - hosted: org creation happens during a dedicated onboarding flow, so here
  *    we only activate an existing membership (never auto-create).
  *
@@ -72,19 +74,7 @@ export const ensureActiveOrgId = cache(async (): Promise<string | null> => {
   let orgId = (await listOwn())?.[0]?.id ?? null;
 
   if (!orgId && process.env.KUNDEO_EDITION !== "hosted") {
-    try {
-      const created = await auth.api.createOrganization({
-        body: {
-          name: "Mein Unternehmen",
-          slug: `org-${session.user.id.slice(0, 12)}`,
-        },
-        headers: h,
-      });
-      orgId = created?.id ?? null;
-    } catch {
-      // A concurrent request may have created it first (unique slug) — re-read.
-      orgId = (await listOwn())?.[0]?.id ?? null;
-    }
+    orgId = await joinOrCreateSelfHostOrg(session.user.id, h, listOwn);
   }
 
   if (orgId) {
@@ -95,6 +85,63 @@ export const ensureActiveOrgId = cache(async (): Promise<string | null> => {
   }
   return orgId;
 });
+
+/**
+ * Self-host org bootstrap for a user who has no organization yet.
+ *
+ * Same-tenant → same-org: a self-host instance is single-tenant (the Entra
+ * `ENTRA_TENANT_ID` lock, and typically a single company), so its primary org
+ * *is* the tenant's org. A user who signed in via Entra therefore joins that
+ * existing org as a member instead of getting a private one — a whole company
+ * lands in one tenant. This is gated on an actual Microsoft account so open
+ * email/password signups still get their own org and can't auto-join a
+ * stranger's data. When no org exists yet, the caller is the first user and
+ * bootstraps the org as its owner (either sign-in path).
+ */
+async function joinOrCreateSelfHostOrg(
+  userId: string,
+  h: Awaited<ReturnType<typeof headers>>,
+  listOwn: () => ReturnType<typeof auth.api.listOrganizations>,
+): Promise<string | null> {
+  const viaEntra = await prisma.account.findFirst({
+    where: { userId, providerId: "microsoft" },
+    select: { id: true },
+  });
+
+  if (viaEntra) {
+    // The instance's primary org is the oldest *adopted* org — oldest that has
+    // at least one member. Requiring a member skips a seeded/demo org that no
+    // human belongs to, so Entra users land in the real company org.
+    const primary = await prisma.organization.findFirst({
+      where: { members: { some: {} } },
+      orderBy: { createdAt: "asc" },
+      select: { id: true },
+    });
+    if (primary) {
+      try {
+        await prisma.member.create({
+          data: { id: randomUUID(), organizationId: primary.id, userId, role: "member" },
+        });
+      } catch {
+        // Already a member (unique organizationId+userId) — a concurrent
+        // request won the race. Nothing to do.
+      }
+      return primary.id;
+    }
+  }
+
+  // First user on the instance (or an email/password signup): create their org.
+  try {
+    const created = await auth.api.createOrganization({
+      body: { name: "Mein Unternehmen", slug: `org-${userId.slice(0, 12)}` },
+      headers: h,
+    });
+    return created?.id ?? null;
+  } catch {
+    // A concurrent request may have created it first (unique slug) — re-read.
+    return (await listOwn())?.[0]?.id ?? null;
+  }
+}
 
 /**
  * Runs `fn` inside a tenant-scoped transaction (Postgres RLS enforced) for the

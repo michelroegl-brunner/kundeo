@@ -122,6 +122,58 @@ All configuration is env-based (see [`.env.example`](./.env.example)).
 | `KUNDEO_M365_*` | Tenant/client id, secret, sender (when provider = `m365`). |
 | `KUNDEO_WEBHOOK_ALLOWED_HOSTS` | Optional comma-separated webhook host allowlist. |
 | `KUNDEO_DISABLE_AUTOMATION_TICKER` | Set to `1` to disable the schedule/delay sweeper. |
+| `ENTRA_CLIENT_ID` | Entra app registration's Application (client) ID — enables Microsoft login. |
+| `ENTRA_CLIENT_SECRET` | Client secret value from the app registration. |
+| `ENTRA_TENANT_ID` | Your tenant GUID or verified domain — **never** `common`. |
+
+### Microsoft Entra ID login (optional)
+
+Let users sign in with their Microsoft 365 / Entra ID work account. The button
+appears on the login screen only when all three `ENTRA_*` variables are set;
+otherwise Kundeo runs email/password only.
+
+**Create an app registration** in the [Entra admin center](https://entra.microsoft.com)
+→ **App registrations** → **New registration**:
+
+1. **Supported account types:** single tenant.
+2. **Redirect URI** (platform *Web*) — the callback URL is always your base URL
+   plus the fixed path `/api/auth/callback/microsoft`:
+
+   ```
+   <BETTER_AUTH_URL>/api/auth/callback/microsoft
+   ```
+
+   Examples: `http://localhost:3000/api/auth/callback/microsoft` (dev),
+   `https://crm.example.com/api/auth/callback/microsoft` (prod). Register one
+   redirect URI per environment you run.
+3. From **Overview**, copy **Application (client) ID** → `ENTRA_CLIENT_ID` and
+   **Directory (tenant) ID** → `ENTRA_TENANT_ID`.
+4. **Certificates & secrets** → **New client secret** → copy the *Value* (not the
+   Secret ID) → `ENTRA_CLIENT_SECRET`. Secrets expire — note the expiry and
+   rotate before then.
+
+**Required API permissions** — Microsoft Graph, **Delegated** (not Application):
+
+| Permission | Type | Why |
+| --- | --- | --- |
+| `openid` | Delegated | OIDC sign-in (issues the ID token). |
+| `profile` | Delegated | User's name and basic profile claims. |
+| `email` | Delegated | User's email — Kundeo's account key. |
+| `offline_access` | Delegated | Refresh token so the session can be renewed without re-login. |
+| `User.Read` | Delegated | Default Graph scope; read the signed-in user. Optional here because Kundeo disables the Graph profile-photo fetch, but it is the standard delegated grant and usually already present. |
+
+These are delegated, user-consentable permissions — no Application permissions
+and no directory-wide access are requested. Granting **admin consent** for the
+tenant (App registration → **API permissions** → *Grant admin consent*) lets
+users sign in without an individual consent prompt. `email`/`profile`/`openid`
+are standard OIDC scopes; `User.Read` is added to new registrations by default.
+
+> **Single-tenant lock:** `ENTRA_TENANT_ID` must be your tenant GUID or a
+> verified domain. Setting it to `common` would let *any* Microsoft account
+> worldwide sign in (and, on self-host, auto-create an org).
+
+See [`docs/features/entra-login.md`](./docs/features/entra-login.md) for the full
+design.
 
 ---
 
