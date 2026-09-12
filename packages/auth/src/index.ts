@@ -12,10 +12,16 @@ import { prisma } from "@kundeo/db";
  * would let any Microsoft account worldwide complete the flow (and, on
  * self-host, auto-create an org). The single-tenant lock is mandatory.
  */
+// Read via a dynamic key, never `process.env.ENTRA_CLIENT_ID` directly: these
+// vars are NOT set during `next build`, and a static reference gets inlined as
+// `undefined` at build time, which would fold `entraEnabled` to a permanent
+// false in the standalone bundle regardless of the real runtime env. The
+// indirection forces a genuine runtime read (same approach as lib/email).
+const readEnv = (key: string): string | undefined => process.env[key];
 const entra = {
-  clientId: process.env.ENTRA_CLIENT_ID,
-  clientSecret: process.env.ENTRA_CLIENT_SECRET,
-  tenantId: process.env.ENTRA_TENANT_ID,
+  clientId: readEnv("ENTRA_CLIENT_ID"),
+  clientSecret: readEnv("ENTRA_CLIENT_SECRET"),
+  tenantId: readEnv("ENTRA_TENANT_ID"),
 };
 const entraEnabled = Boolean(entra.clientId && entra.clientSecret && entra.tenantId);
 
