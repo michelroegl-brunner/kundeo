@@ -7,9 +7,11 @@ import PDFDocument from "pdfkit";
  * built-in Helvetica font uses WinAnsi encoding, which covers € and the German
  * umlauts, so no font file needs embedding.
  *
- * pdfkit reads its AFM metrics from its own package at runtime; it is listed in
- * `serverExternalPackages` (next.config) so Next keeps those files on disk in
- * the traced standalone output instead of bundling the module.
+ * pdfkit loads its built-in fonts (metrics + glyphs) by lazily requiring files
+ * under its own `js/` dir at runtime. Next's tracer can't follow those dynamic
+ * requires, so next.config pins pdfkit as a `serverExternalPackages` entry AND
+ * force-includes its `js/**` tree via `outputFileTracingIncludes` — otherwise
+ * `doc.font("Helvetica")` throws in the standalone build.
  */
 
 export interface MahnungPdfData {

@@ -135,7 +135,7 @@ Turborepo monorepo (pnpm workspaces).
 | `packages/db` | Prisma schema, generated client, `withOrg()` tenant helper, seed, `rls.sql`. |
 | `packages/auth` | Better Auth server (`.`) + browser client (`./client`). |
 | `packages/tsconfig` | Shared TypeScript configs. |
-| `deploy/` | Deployment assets (Postgres init: creates the restricted `kundeo_app` role). |
+| `deploy/` | Deployment assets: production Compose, systemd unit, tarball build, Postgres init (creates the restricted `kundeo_app` role). See [`deploy/README.md`](./deploy/README.md). |
 
 ### Scripts
 
@@ -154,14 +154,25 @@ pnpm db:seed      # seed demo data
 ## Distribution & roadmap
 
 Kundeo is **self-hosted first** and deliberately not coupled to any single
-runtime. The app is already built for a `standalone` Node output; the packaging
-around it is on the roadmap:
+runtime. The app is built for a `standalone` Node output; the packaging around
+it — see **[`deploy/`](./deploy/README.md)** for full instructions:
 
 - ✅ Local dev via Docker Compose (Postgres) + `pnpm dev`.
-- 🚧 Production Docker image (GHCR) + app+db Compose file.
-- 🚧 Native Linux: `standalone` build under systemd, shipped as a prebuilt
-  release tarball.
-- 🚧 GitHub Actions to publish the image and tarball on tag/release.
+- ✅ Production Docker image (GHCR) + app+db Compose file
+  ([`deploy/docker-compose.yml`](./deploy/docker-compose.yml)).
+- ✅ Native Linux: `standalone` build under systemd, shipped as a prebuilt
+  release tarball ([`deploy/build-tarball.sh`](./deploy/build-tarball.sh),
+  [`deploy/systemd/`](./deploy/systemd)).
+- ✅ GitHub Actions to publish the image and tarball on tag/release
+  ([`.github/workflows/release.yml`](./.github/workflows/release.yml)).
+
+Both deployment paths apply migrations (schema + Row-Level Security) on start
+and share one env-based setup. Quick start:
+
+```bash
+cd deploy && cp env.example .env   # fill in secrets
+docker compose up -d               # app on :3000 + PostgreSQL
+```
 
 
 ---

@@ -1,0 +1,95 @@
+name: Release
+
+# Publishes the production Docker image to GHCR and the native release tarball
+# as release artifacts. Triggers on a version tag (v*) or a published GitHub
+# release.
+on:
+  push:
+    tags: ["v*"]
+  release:
+    types: [published]
+
+permissions:
+  contents: write # attach the tarball to the release
+  packages: write # push the image to GHCR
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ─── Docker image → GHCR ───────────────────────────────────────────────────
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/${{ github.repository }}
+          # e.g. v1.2.3 -> :1.2.3, :1.2, :latest
+          tags: |
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ─── Native release tarball → release assets ───────────────────────────────
+  tarball:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # tags, so build-tarball.sh can name the artifact
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Build release tarball
+        env:
+          DATABASE_URL: "postgresql://build:build@localhost:5432/build?schema=public"
+          DIRECT_URL: "postgresql://build:build@localhost:5432/build?schema=public"
+          BETTER_AUTH_SECRET: "ci-placeholder-secret-not-used-at-runtime"
+          BETTER_AUTH_URL: "http://localhost:3000"
+          KUNDEO_ENCRYPTION_KEY: "ci-placeholder-key-not-used-at-runtime"
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: deploy/build-tarball.sh "${GITHUB_REF_NAME}"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: kundeo-linux-tarball
+          path: dist-release/*.tar.gz
+
+      - name: Attach to release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" dist-release/*.tar.gz --clobber

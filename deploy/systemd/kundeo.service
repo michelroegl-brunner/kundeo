@@ -1,0 +1,41 @@
+# Kundeo systemd unit for a native (non-Docker) install.
+#
+# Assumes the release tarball is extracted to /opt/kundeo, Node >= 20 is on the
+# host, and /opt/kundeo/kundeo.env holds the runtime config (see kundeo.env.example).
+# Install:
+#   sudo useradd --system --home /opt/kundeo --shell /usr/sbin/nologin kundeo
+#   sudo cp /opt/kundeo/kundeo.service /etc/systemd/system/kundeo.service
+#   sudo systemctl daemon-reload && sudo systemctl enable --now kundeo
+[Unit]
+Description=Kundeo CRM
+Documentation=https://github.com/michelroegl-brunner/kundeo
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=kundeo
+Group=kundeo
+WorkingDirectory=/opt/kundeo
+EnvironmentFile=/opt/kundeo/kundeo.env
+Environment=NODE_ENV=production
+Environment=PORT=3000
+Environment=HOSTNAME=0.0.0.0
+# Apply pending migrations (schema + RLS) as the DB owner before serving.
+ExecStartPre=/opt/kundeo/bin/migrate.sh
+ExecStart=/usr/bin/node apps/web/server.js
+Restart=on-failure
+RestartSec=5
+
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectControlGroups=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

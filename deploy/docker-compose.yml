@@ -1,0 +1,54 @@
+# Kundeo production stack: app + PostgreSQL.
+#
+#   cd deploy
+#   cp env.example .env      # fill in the secrets
+#   docker compose up -d
+#
+# The app image applies migrations (incl. Row-Level Security) on start, then
+# serves on :3000. Postgres is internal-only (not published to the host); the
+# init script creates the restricted `kundeo_app` role the app connects as.
+name: kundeo
+
+services:
+  db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: kundeo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: kundeo
+    volumes:
+      - kundeo_pgdata:/var/lib/postgresql/data
+      # Creates the limited `kundeo_app` runtime role (subject to RLS). Runs
+      # once, on first boot of an empty data volume.
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/10-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U kundeo -d kundeo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  app:
+    # Published on tag/release by .github/workflows/release.yml.
+    # Pin a version (e.g. :0.1.0) in production instead of :latest.
+    image: ${KUNDEO_IMAGE:-ghcr.io/michelroegl-brunner/kundeo:latest}
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      # Runtime connection: restricted role that RLS applies to. The password
+      # must match the one in deploy/postgres/init.sql.
+      DATABASE_URL: postgresql://kundeo_app:kundeo_app@db:5432/kundeo?schema=public
+      # Owner connection used by `prisma migrate deploy` at start (bypasses RLS).
+      DIRECT_URL: postgresql://kundeo:${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}@db:5432/kundeo?schema=public
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?set BETTER_AUTH_SECRET in .env}
+      BETTER_AUTH_URL: ${BETTER_AUTH_URL:?set BETTER_AUTH_URL in .env}
+      KUNDEO_ENCRYPTION_KEY: ${KUNDEO_ENCRYPTION_KEY:?set KUNDEO_ENCRYPTION_KEY in .env}
+      KUNDEO_EDITION: ${KUNDEO_EDITION:-self-hosted}
+      KUNDEO_EMAIL_PROVIDER: ${KUNDEO_EMAIL_PROVIDER:-log}
+    ports:
+      - "${KUNDEO_PORT:-3000}:3000"
+
+volumes:
+  kundeo_pgdata:

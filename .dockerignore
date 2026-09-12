@@ -1,0 +1,40 @@
+# Keep the build context small and reproducible. Anything the build needs is
+# copied explicitly in the Dockerfile.
+node_modules
+**/node_modules
+
+# Build outputs (rebuilt inside the image)
+.next
+**/.next
+out
+**/out
+dist
+**/dist
+build
+**/build
+.turbo
+**/.turbo
+
+# Prisma generated client (regenerated during the build)
+packages/db/generated
+
+# Env / secrets — never bake into an image
+.env
+.env.*
+!.env.example
+
+# VCS / tooling / local
+.git
+.github
+.gitignore
+.claude
+**/.DS_Store
+*.log
+coverage
+*.tsbuildinfo
+
+# Docs & assets not needed at build time
+docs
+design_handoff_freefinance
+README.md
+LICENSE
