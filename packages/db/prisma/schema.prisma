@@ -870,6 +870,9 @@ model McpAccessToken {
   id               String    @id @default(cuid())
   tokenHash        String    @unique // sha256 hex of the access token
   refreshTokenHash String?   @unique // sha256 hex of the refresh token
+  // Refresh-rotation lineage: all tokens descended from one authorization share
+  // a familyId, so reuse of a rotated refresh token can revoke the whole family.
+  familyId         String?
   clientId         String
   userId           String
   organizationId   String
@@ -882,5 +885,6 @@ model McpAccessToken {
 
   @@index([organizationId])
   @@index([clientId])
+  @@index([familyId])
   @@map("mcp_access_token")
 }

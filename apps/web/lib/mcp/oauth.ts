@@ -115,16 +115,38 @@ export function authorizationServerMetadata(req: Request) {
 
 // ── dynamic client registration (RFC 7591) ───────────────────────────────────
 
-function isHttpsOrLocalhost(uri: string): boolean {
+// Schemes that can execute script or read local data if a browser were ever
+// pointed at them — never valid OAuth redirect targets.
+const BLOCKED_REDIRECT_PROTOCOLS = new Set([
+  "javascript:",
+  "data:",
+  "vbscript:",
+  "file:",
+  "about:",
+  "blob:",
+  "filesystem:",
+]);
+
+/**
+ * Whether a redirect URI is an acceptable OAuth callback: https anywhere, http
+ * only on loopback (native/dev clients), or a genuine custom app scheme
+ * (reverse-DNS style, e.g. "com.example.app:"). Dangerous pseudo-schemes are
+ * rejected outright. Enforced both at registration and at authorize time.
+ */
+export function isAllowedRedirect(uri: string): boolean {
   try {
     const u = new URL(uri);
+    if (BLOCKED_REDIRECT_PROTOCOLS.has(u.protocol)) return false;
     if (u.protocol === "https:") return true;
-    // Native/dev clients use a loopback http redirect.
-    if (u.protocol === "http:" && (u.hostname === "localhost" || u.hostname === "127.0.0.1")) {
+    if (
+      u.protocol === "http:" &&
+      (u.hostname === "localhost" || u.hostname === "127.0.0.1" || u.hostname === "[::1]")
+    ) {
       return true;
     }
-    // Custom app schemes (e.g. a desktop client) are allowed.
-    return u.protocol !== "http:" && u.protocol !== "https:";
+    // Custom native-app scheme: must look like a reverse-DNS scheme (contains a
+    // dot), which excludes single-word pseudo-schemes like the blocked ones.
+    return /^[a-z][a-z0-9+.-]*\.[a-z0-9+.-]*:$/.test(u.protocol);
   } catch {
     return false;
   }
@@ -150,7 +172,7 @@ export async function registerClient(body: unknown): Promise<RegisteredClient> {
     throw new OAuthError("invalid_redirect_uri", "At least one redirect_uri is required");
   }
   for (const uri of redirectUris) {
-    if (!isHttpsOrLocalhost(uri)) {
+    if (!isAllowedRedirect(uri)) {
       throw new OAuthError("invalid_redirect_uri", `Redirect URI not allowed: ${uri}`);
     }
   }
@@ -193,6 +215,11 @@ export async function validateAuthorizeClient(clientId: string, redirectUri: str
   const client = await loadClient(clientId);
   if (!client.redirects.includes(redirectUri)) {
     throw new OAuthError("invalid_request", "redirect_uri does not match a registered URI");
+  }
+  // Re-check the scheme even though registration validated it, so a URI that
+  // somehow reached the DB by another path can never be used as a callback.
+  if (!isAllowedRedirect(redirectUri)) {
+    throw new OAuthError("invalid_request", "redirect_uri scheme not allowed");
   }
   return client;
 }
@@ -260,6 +287,7 @@ async function issueTokens(row: {
   userId: string;
   organizationId: string;
   scope: string;
+  familyId?: string | null;
 }): Promise<TokenResponse> {
   const accessToken = randomToken(ACCESS_PREFIX);
   const refreshToken = randomToken(REFRESH_PREFIX);
@@ -268,6 +296,8 @@ async function issueTokens(row: {
     data: {
       tokenHash: hashToken(accessToken),
       refreshTokenHash: hashToken(refreshToken),
+      // A fresh authorization starts a new family; a rotation carries it on.
+      familyId: row.familyId ?? randomBytes(16).toString("hex"),
       clientId: row.clientId,
       userId: row.userId,
       organizationId: row.organizationId,
@@ -330,13 +360,25 @@ export async function refreshAccessToken(params: {
   const record = await prisma.mcpAccessToken.findUnique({
     where: { refreshTokenHash: hashToken(params.refreshToken) },
   });
-  if (!record || record.revokedAt) throw new OAuthError("invalid_grant", "Invalid refresh token");
+  if (!record) throw new OAuthError("invalid_grant", "Invalid refresh token");
+
+  // Reuse of an already-rotated refresh token signals theft: revoke the whole
+  // family so the attacker's rotated chain dies too (OAuth 2.1 §4.14.2).
+  if (record.revokedAt) {
+    if (record.familyId) {
+      await prisma.mcpAccessToken.updateMany({
+        where: { familyId: record.familyId, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+    }
+    throw new OAuthError("invalid_grant", "Refresh token already used");
+  }
   if (record.clientId !== client.id) throw new OAuthError("invalid_grant", "Refresh token issued to another client");
   if (record.refreshExpiresAt && record.refreshExpiresAt.getTime() <= Date.now()) {
     throw new OAuthError("invalid_grant", "Refresh token expired");
   }
 
-  // Rotate: revoke the old token row, issue a new pair.
+  // Rotate: revoke the old token row, issue a new pair in the same family.
   await prisma.mcpAccessToken.update({ where: { id: record.id }, data: { revokedAt: new Date() } });
   return issueTokens(record);
 }
