@@ -18,23 +18,33 @@ import { Input } from "@/components/ui/input";
 import { Icon } from "@/components/ui/icon";
 
 /** Nav id ↔ route. English routes, German labels (per the terminology table). */
-const NAV: (SidebarNavItem & { href?: string })[] = [
-  { id: "dashboard", label: "Übersicht", icon: "layout-dashboard", href: "/dashboard" },
-  { section: "Vertrieb" },
-  { id: "pipeline", label: "Pipeline", icon: "kanban", href: "/deals" },
-  { id: "contacts", label: "Kontakte", icon: "users", href: "/contacts" },
-  { id: "companies", label: "Firmen", icon: "building-2", href: "/companies" },
-  { id: "activities", label: "Aktivitäten", icon: "activity", href: "/activities" },
-  { section: "Automatisierung" },
-  { id: "automations", label: "Automationen", icon: "workflow", href: "/automationen" },
-  { section: "Organisation" },
-  { id: "team", label: "Team", icon: "user-cog", href: "/team" },
-  { id: "settings", label: "Einstellungen", icon: "settings", href: "/settings" },
+type NavItem = SidebarNavItem & { href?: string };
+
+// The Belege section (FreeFinance) is only shown when the integration is
+// connected — it is an additive, capability-gated layer.
+const BELEGE_NAV: NavItem[] = [
+  { section: "Belege" },
+  { id: "products", label: "Produkte", icon: "package", href: "/products" },
+  { id: "offers", label: "Angebote", icon: "file-text", href: "/offers" },
+  { id: "invoices", label: "Rechnungen", icon: "receipt", href: "/invoices" },
 ];
 
-const ROUTES: Record<string, string> = Object.fromEntries(
-  NAV.filter((n) => n.id && n.href).map((n) => [n.id as string, n.href as string]),
-);
+function buildNav(showBelege: boolean): NavItem[] {
+  return [
+    { id: "dashboard", label: "Übersicht", icon: "layout-dashboard", href: "/dashboard" },
+    { section: "Vertrieb" },
+    { id: "pipeline", label: "Pipeline", icon: "kanban", href: "/deals" },
+    { id: "contacts", label: "Kontakte", icon: "users", href: "/contacts" },
+    { id: "companies", label: "Firmen", icon: "building-2", href: "/companies" },
+    { id: "activities", label: "Aktivitäten", icon: "activity", href: "/activities" },
+    ...(showBelege ? BELEGE_NAV : []),
+    { section: "Automatisierung" },
+    { id: "automations", label: "Automationen", icon: "workflow", href: "/automationen" },
+    { section: "Organisation" },
+    { id: "team", label: "Team", icon: "user-cog", href: "/team" },
+    { id: "settings", label: "Einstellungen", icon: "settings", href: "/settings" },
+  ];
+}
 
 const DEFAULT_TITLES: Record<string, string> = {
   dashboard: "Übersicht",
@@ -42,6 +52,9 @@ const DEFAULT_TITLES: Record<string, string> = {
   contacts: "Kontakte",
   companies: "Firmen",
   activities: "Aktivitäten",
+  products: "Produkte",
+  offers: "Angebote",
+  invoices: "Rechnungen",
   automations: "Automationen",
   team: "Team",
   settings: "Einstellungen",
@@ -52,6 +65,9 @@ function activeIdFor(pathname: string): string {
   if (pathname.startsWith("/contacts")) return "contacts";
   if (pathname.startsWith("/companies")) return "companies";
   if (pathname.startsWith("/activities")) return "activities";
+  if (pathname.startsWith("/products")) return "products";
+  if (pathname.startsWith("/offers")) return "offers";
+  if (pathname.startsWith("/invoices")) return "invoices";
   if (pathname.startsWith("/automationen")) return "automations";
   if (pathname.startsWith("/team")) return "team";
   if (pathname.startsWith("/settings")) return "settings";
@@ -83,10 +99,13 @@ export function PageHeader({ title, breadcrumb, actions }: Chrome) {
 export function AppShell({
   org,
   user,
+  freeFinanceConnected = false,
   children,
 }: {
   org: { name: string; slug: string };
   user: { name: string; email: string };
+  /** Shows the Belege section (Produkte/Angebote/Rechnungen) when connected. */
+  freeFinanceConnected?: boolean;
   children: ReactNode;
 }) {
   const pathname = usePathname();
@@ -94,6 +113,10 @@ export function AppShell({
   const [chrome, setChrome] = useState<Chrome>({});
   const setChromeCb = useCallback((c: Chrome) => setChrome(c), []);
 
+  const nav = buildNav(freeFinanceConnected);
+  const routes: Record<string, string> = Object.fromEntries(
+    nav.filter((n) => n.id && n.href).map((n) => [n.id as string, n.href as string]),
+  );
   const activeId = activeIdFor(pathname);
   const title = chrome.title ?? DEFAULT_TITLES[activeId] ?? "";
 
@@ -110,9 +133,9 @@ export function AppShell({
           <SidebarNav
             className="flex-1"
             activeId={activeId}
-            onSelect={(id) => ROUTES[id] && router.push(ROUTES[id])}
+            onSelect={(id) => routes[id] && router.push(routes[id])}
             header={<OrgSwitcher org={org} />}
-            items={NAV}
+            items={nav}
           />
           <UserRow user={user} onSignOut={signOut} />
         </aside>

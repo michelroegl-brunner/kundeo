@@ -27,8 +27,11 @@ import {
   type ActionResult,
 } from "@/app/(app)/settings/actions";
 import { EmailTemplatesTab } from "@/components/settings/email-templates/email-templates-tab";
+import { FreeFinanceTab } from "@/components/settings/freefinance-tab";
 import type { EmailProvider } from "@/lib/email";
 import type { EmailTemplateItem, PreviewRecord } from "@/components/settings/email-templates/types";
+import type { FreeFinanceConfigPublic } from "@/lib/freefinance/config";
+import type { FreeFinanceDefaults } from "@/app/(app)/settings/freefinance-actions";
 
 const CURRENCY_OPTIONS = [
   { value: "EUR", label: "Euro (EUR)" },
@@ -79,6 +82,7 @@ export interface SettingsViewProps {
   templateCategories: string[];
   emailProvider: EmailProvider;
   previewRecords: PreviewRecord[];
+  freeFinance: { config: FreeFinanceConfigPublic; defaults: FreeFinanceDefaults };
 }
 
 export function SettingsView({
@@ -91,6 +95,7 @@ export function SettingsView({
   templateCategories,
   emailProvider,
   previewRecords,
+  freeFinance,
 }: SettingsViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState("org");
@@ -114,6 +119,7 @@ export function SettingsView({
     { id: "org", label: "Organisation", icon: "building-2" },
     { id: "pipelines", label: "Pipelines", icon: "kanban" },
     { id: "emailTemplates", label: "E-Mail-Vorlagen", icon: "mail" },
+    { id: "integrations", label: "Integrationen", icon: "plug" },
     { id: "notifications", label: "Benachrichtigungen", icon: "bell" },
     { id: "instance", label: "Instanz", icon: "server" },
   ];
@@ -135,6 +141,8 @@ export function SettingsView({
           pending={pending}
           run={run}
         />
+      ) : tab === "integrations" ? (
+        <FreeFinanceTab config={freeFinance.config} defaults={freeFinance.defaults} pending={pending} run={run} />
       ) : tab === "notifications" ? (
         <NotificationsTab prefs={prefs} pending={pending} run={run} />
       ) : (

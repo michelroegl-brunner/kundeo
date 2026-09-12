@@ -7,6 +7,8 @@ import {
 } from "@/components/settings/settings-view";
 import { loadEmailTemplateItems } from "@/lib/email/template-usage";
 import { resolveEmailProvider } from "@/lib/email";
+import { resolveFreeFinanceConfigPublic } from "@/lib/freefinance/config";
+import type { FreeFinanceDefaults } from "@/app/(app)/settings/freefinance-actions";
 import type { PreviewRecord } from "@/components/settings/email-templates/types";
 import { formatDate, formatMoney } from "@/lib/format";
 import pkg from "../../../package.json";
@@ -140,6 +142,17 @@ export default async function SettingsPage() {
     (a, b) => a.localeCompare(b, "de"),
   );
 
+  const freeFinanceConfig = orgId
+    ? await resolveFreeFinanceConfigPublic(orgId)
+    : { baseUrl: "", clientId: "", mandant: "", hasSecret: false, source: null };
+  const storedFf = (meta.freefinance as Partial<FreeFinanceDefaults> | undefined) ?? {};
+  const freeFinanceDefaults: FreeFinanceDefaults = {
+    account: typeof storedFf.account === "string" ? storedFf.account : "",
+    vatRate: typeof storedFf.vatRate === "number" ? storedFf.vatRate : 20,
+    unit: typeof storedFf.unit === "string" ? storedFf.unit : "STK",
+    eInvoice: typeof storedFf.eInvoice === "string" ? storedFf.eInvoice : "NONE",
+  };
+
   return (
     <SettingsView
       org={orgSettings}
@@ -151,6 +164,7 @@ export default async function SettingsPage() {
       templateCategories={templateCategories}
       emailProvider={resolveEmailProvider()}
       previewRecords={previewRecords}
+      freeFinance={{ config: freeFinanceConfig, defaults: freeFinanceDefaults }}
     />
   );
 }

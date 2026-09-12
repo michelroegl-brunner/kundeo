@@ -94,6 +94,20 @@ import {
   Italic,
   Link,
   ListOrdered,
+  // FreeFinance integration
+  Package,
+  FileText,
+  Receipt,
+  Calculator,
+  Plug,
+  PlugZap,
+  Percent,
+  Paperclip,
+  FileDown,
+  FileCheck,
+  Save,
+  Ellipsis,
+  RefreshCw,
   type LucideIcon,
 } from "lucide-react";
 
@@ -201,6 +215,20 @@ const ICONS: Record<string, LucideIcon> = {
   italic: Italic,
   link: Link,
   "list-ordered": ListOrdered,
+  // FreeFinance integration
+  package: Package,
+  "file-text": FileText,
+  receipt: Receipt,
+  calculator: Calculator,
+  plug: Plug,
+  "plug-zap": PlugZap,
+  percent: Percent,
+  paperclip: Paperclip,
+  "file-down": FileDown,
+  "file-check": FileCheck,
+  save: Save,
+  ellipsis: Ellipsis,
+  "refresh-cw": RefreshCw,
 };
 
 export interface IconProps {
