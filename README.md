@@ -82,6 +82,32 @@ Email delivery is swappable behind one interface, chosen by env:
 - **`smtp`** — any SMTP server via nodemailer.
 - **`m365`** — Microsoft 365 / Graph `sendMail` with client credentials.
 
+### FreeFinance integration (optional)
+Connect [FreeFinance](https://freefinance.at) (Austrian accounting SaaS) to turn
+CRM deals into offers and invoices without leaving Kundeo. Fully **additive and
+capability-gated** — with no credentials configured the feature is invisible and
+every CRM flow is unchanged.
+
+- **Angebote-Builder** — build offers from the live FreeFinance item catalogue,
+  with per-line **Rabatte**, per-line **Konto** override and a live net/tax/total,
+  then post them back to FreeFinance.
+- **Produkte** — a product catalogue that syncs to FreeFinance `itm/items`.
+- **Rechnungen** — create invoices from a deal or an accepted offer, staging →
+  finalize (irreversible), with FreeFinance owning numbering and the PDF.
+- **PDF flow-back** — finalized Angebot/Rechnung PDFs are pulled back and sent
+  from **Kundeo's own email system**, not FreeFinance.
+- **Mahnwesen** — a Kundeo-owned dunning ladder over finalized FreeFinance
+  invoices (Verzugszinsen + Mahngebühren, escalating Mahnstufen by email). Kundeo
+  owns it because the FreeFinance API exposes no dunning resource — see
+  [`docs/features/mahnwesen.md`](./docs/features/mahnwesen.md).
+- **Automations** — `freefinance.*` actions (customer sync, invoice create) run
+  through the durable outbox with a retrying sync-job queue; payment status is
+  read back into invoice state.
+
+Credentials resolve **env-first** (self-host, single org) → per-org row (hosted,
+secret encrypted at rest). See [`docs/integrations/freefinance.md`](./docs/integrations/freefinance.md)
+for the full design.
+
 ---
 
 ## Quick start (local dev)
@@ -125,6 +151,11 @@ All configuration is env-based (see [`.env.example`](./.env.example)).
 | `ENTRA_CLIENT_ID` | Entra app registration's Application (client) ID — enables Microsoft login. |
 | `ENTRA_CLIENT_SECRET` | Client secret value from the app registration. |
 | `ENTRA_TENANT_ID` | Your tenant GUID or verified domain — **never** `common`. |
+| `KUNDEO_FREEFINANCE_BASE_URL` | FreeFinance API host (without `/api/2.0`) — enables the FreeFinance integration. |
+| `KUNDEO_FREEFINANCE_CLIENT_ID` | OAuth client id (technical user) for the client-credentials grant. |
+| `KUNDEO_FREEFINANCE_CLIENT_SECRET` | OAuth client secret for that technical user. |
+| `KUNDEO_FREEFINANCE_MANDANT` | Numeric FreeFinance client id (Mandant) used in every API path. |
+| `KUNDEO_ENCRYPTION_KEY` | AES-GCM key for encrypting per-org integration secrets at rest (hosted / DB-stored credentials). |
 
 ### Microsoft Entra ID login (optional)
 
@@ -174,6 +205,23 @@ are standard OIDC scopes; `User.Read` is added to new registrations by default.
 
 See [`docs/features/entra-login.md`](./docs/features/entra-login.md) for the full
 design.
+
+### FreeFinance integration (optional)
+
+Turn CRM deals into FreeFinance offers and invoices, pull the finalized PDFs
+back into Kundeo, and run Kundeo-owned dunning over them. The integration is off
+until credentials are present.
+
+- **Self-host (single org):** set the four `KUNDEO_FREEFINANCE_*` variables above.
+  Env credentials win, so no database row is needed and the settings form renders
+  them read-only.
+- **Hosted (many orgs):** each org connects its own Mandant in
+  **Einstellungen → Integrationen → FreeFinance**; the client secret is encrypted
+  at rest with `KUNDEO_ENCRYPTION_KEY` (AES-GCM).
+
+The `MANDANT` is the **numeric client id** (from `GET /clients`), not the OAuth
+`client_id`. Full API notes, field mappings and the phased design live in
+[`docs/integrations/freefinance.md`](./docs/integrations/freefinance.md).
 
 ---
 
