@@ -826,3 +826,65 @@ model McpApiKey {
   @@index([organizationId])
   @@map("mcp_api_key")
 }
+
+// OAuth 2.1 for MCP — the discovery path remote agents use instead of a manually
+// pasted key. Like mcp_api_key, these are auth *infrastructure* (resolved before
+// any org context exists) and are deliberately NOT under RLS. All secrets are
+// stored as SHA-256 hashes; the tables below carry no plaintext.
+
+// A dynamically registered (RFC 7591) OAuth client. Public clients (PKCE-only)
+// have no secret; confidential clients store a hashed secret. Not org-scoped: a
+// client registers once, then the organization is bound per authorization.
+model McpOAuthClient {
+  id               String   @id @default(cuid()) // the OAuth client_id
+  clientSecretHash String? // sha256 hex; null for public (PKCE) clients
+  clientName       String
+  redirectUris     String // JSON array of allowed redirect URIs
+  createdAt        DateTime @default(now())
+
+  @@map("mcp_oauth_client")
+}
+
+// A short-lived authorization code, PKCE-bound. Single use (consumedAt).
+model McpAuthCode {
+  id                  String    @id @default(cuid())
+  codeHash            String    @unique // sha256 hex of the issued code
+  clientId            String
+  userId              String
+  organizationId      String
+  redirectUri         String
+  scope               String // "read_only" | "read_write"
+  codeChallenge       String
+  codeChallengeMethod String    @default("S256")
+  expiresAt           DateTime
+  consumedAt          DateTime?
+  createdAt           DateTime  @default(now())
+
+  @@index([clientId])
+  @@map("mcp_auth_code")
+}
+
+// An issued access token (and its optional refresh token). Bound to one org; the
+// MCP endpoint resolves the bearer here, then runs tools through withOrg().
+model McpAccessToken {
+  id               String    @id @default(cuid())
+  tokenHash        String    @unique // sha256 hex of the access token
+  refreshTokenHash String?   @unique // sha256 hex of the refresh token
+  // Refresh-rotation lineage: all tokens descended from one authorization share
+  // a familyId, so reuse of a rotated refresh token can revoke the whole family.
+  familyId         String?
+  clientId         String
+  userId           String
+  organizationId   String
+  scope            String // "read_only" | "read_write"
+  expiresAt        DateTime
+  refreshExpiresAt DateTime?
+  revokedAt        DateTime?
+  lastUsedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  @@index([organizationId])
+  @@index([clientId])
+  @@index([familyId])
+  @@map("mcp_access_token")
+}

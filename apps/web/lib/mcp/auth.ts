@@ -1,6 +1,7 @@
 import "server-only";
 import { prisma } from "@kundeo/db";
 import { hashToken, hashesEqual, looksLikeToken } from "./keys";
+import { resolveOAuthToken } from "./oauth";
 
 /**
  * Resolved identity behind an MCP request. All CRM access performed on behalf of
@@ -37,6 +38,12 @@ export async function authenticateMcp(req: Request): Promise<McpContext | null> 
   if (!match?.[1]) return null;
 
   const token = match[1].trim();
+
+  // OAuth 2.1 access tokens (the discovery flow) take precedence; manual
+  // per-org API keys are the fallback for self-host without OAuth.
+  const viaOAuth = await resolveOAuthToken(token);
+  if (viaOAuth) return viaOAuth;
+
   if (!looksLikeToken(token)) return null;
 
   const keyHash = hashToken(token);

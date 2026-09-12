@@ -15,7 +15,9 @@ import { formatDate } from "@/lib/format";
 import {
   createMcpKey,
   revokeMcpKey,
+  revokeMcpConnection,
   type McpKeyItem,
+  type McpConnectionItem,
   type McpScope,
 } from "@/app/(app)/settings/mcp-actions";
 
@@ -39,10 +41,12 @@ async function copy(text: string): Promise<boolean> {
 
 export function McpKeysView({
   keys,
+  connections,
   canManage,
   endpoint,
 }: {
   keys: McpKeyItem[];
+  connections: McpConnectionItem[];
   canManage: boolean;
   endpoint: string;
 }) {
@@ -80,6 +84,17 @@ export function McpKeysView({
     });
   }
 
+  function revokeConnection(clientId: string) {
+    start(async () => {
+      const res = await revokeMcpConnection(clientId);
+      setToast(
+        res.ok
+          ? { tone: "success", title: "Verbindung widerrufen" }
+          : { tone: "danger", title: "Widerrufen fehlgeschlagen", description: res.error },
+      );
+    });
+  }
+
   return (
     <>
       <PageHeader title="MCP-Zugriff" breadcrumb={["Einstellungen", "MCP-Zugriff"]} />
@@ -91,8 +106,11 @@ export function McpKeysView({
         >
           <div className="flex flex-col gap-3 text-sm text-content-secondary">
             <p>
-              Agenten greifen über einen MCP-Endpunkt mit einem Bearer-Schlüssel zu. Jeder Schlüssel
-              ist auf diese Organisation beschränkt; alle Zugriffe unterliegen der Mandanten-Isolation
+              Agenten verbinden sich mit dem MCP-Endpunkt entweder per{" "}
+              <span className="font-medium text-content">OAuth</span> (der Client leitet dich zur
+              Freigabe hierher – empfohlen) oder mit einem manuell erstellten{" "}
+              <span className="font-medium text-content">Bearer-Schlüssel</span>. Beide Wege sind auf
+              diese Organisation beschränkt; alle Zugriffe unterliegen der Mandanten-Isolation
               (Row-Level Security).
             </p>
             <Field label="Endpunkt" hint="Streamable-HTTP-Transport. Authentifizierung per Bearer-Token.">
@@ -153,6 +171,51 @@ export function McpKeysView({
                 </Button>
               </div>
             </div>
+          </Card>
+        ) : null}
+
+        {connections.length > 0 ? (
+          <Card
+            title="Verbundene Agenten (OAuth)"
+            subtitle="Über den Discovery-Flow verbundene Clients. Widerruf beendet den Zugriff sofort."
+            padding="none"
+          >
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-edge-subtle text-left text-xs text-content-muted">
+                  <th className="px-4 py-2 font-medium">Client</th>
+                  <th className="px-4 py-2 font-medium">Berechtigung</th>
+                  <th className="px-4 py-2 font-medium">Verbunden</th>
+                  <th className="px-4 py-2 font-medium">Zuletzt genutzt</th>
+                  {canManage ? <th className="px-4 py-2" /> : null}
+                </tr>
+              </thead>
+              <tbody>
+                {connections.map((c) => (
+                  <tr key={c.clientId} className="border-b border-edge-subtle last:border-0">
+                    <td className="px-4 py-2.5 text-content">{c.clientName}</td>
+                    <td className="px-4 py-2.5 text-content-secondary">{scopeLabel(c.scope)}</td>
+                    <td className="px-4 py-2.5 text-content-secondary">{formatDate(c.connectedAt)}</td>
+                    <td className="px-4 py-2.5 text-content-secondary">
+                      {c.lastUsedAt ? formatDate(c.lastUsedAt) : "—"}
+                    </td>
+                    {canManage ? (
+                      <td className="px-4 py-2.5 text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          iconLeft="unplug"
+                          disabled={pending}
+                          onClick={() => revokeConnection(c.clientId)}
+                        >
+                          Widerrufen
+                        </Button>
+                      </td>
+                    ) : null}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </Card>
         ) : null}
 

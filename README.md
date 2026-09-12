@@ -114,8 +114,13 @@ over the [Model Context Protocol](https://modelcontextprotocol.io). A remote MCP
 server is exposed at **`POST /api/mcp`** (Streamable HTTP transport), with tools
 for contacts, companies, deals, pipelines and activities.
 
-- **Self-host first, no external service** — access is granted with
-  per-organization **bearer keys** created under *Einstellungen → Integrationen →
+- **OAuth 2.1 discovery** — OAuth-capable agents (Claude Cowork, claude.ai
+  connectors) connect with just the endpoint URL: the server implements protected
+  resource / authorization-server metadata, dynamic client registration, and the
+  authorization-code + PKCE flow, reusing the signed-in user's session for a
+  consent step bound to their active organization.
+- **Self-host first, no external service** — or grant access with a
+  per-organization **bearer key** created under *Einstellungen → Integrationen →
   MCP-Zugriff*. The plaintext token is shown once; only its SHA-256 hash is
   stored. Send it as `Authorization: Bearer kundeo_mcp_…`.
 - **Tenant-isolated** — a key is bound to one organization and every tool call

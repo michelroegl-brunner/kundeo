@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { authenticateMcp } from "@/lib/mcp/auth";
 import { dispatchMcp, PARSE_ERROR_RESPONSE } from "@/lib/mcp/server";
+import { baseUrl } from "@/lib/mcp/oauth";
 
 /**
  * MCP (Model Context Protocol) endpoint — Streamable HTTP transport.
@@ -15,14 +16,17 @@ import { dispatchMcp, PARSE_ERROR_RESPONSE } from "@/lib/mcp/server";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-function unauthorized() {
+function unauthorized(req: Request) {
+  // RFC 9728: point clients at the protected-resource metadata so they can
+  // discover the authorization server and run the OAuth flow.
+  const resourceMetadata = `${baseUrl(req)}/.well-known/oauth-protected-resource`;
   return new NextResponse(
     JSON.stringify({ jsonrpc: "2.0", id: null, error: { code: -32001, message: "Unauthorized" } }),
     {
       status: 401,
       headers: {
         "content-type": "application/json",
-        "www-authenticate": 'Bearer realm="kundeo-mcp"',
+        "www-authenticate": `Bearer realm="kundeo-mcp", resource_metadata="${resourceMetadata}"`,
       },
     },
   );
@@ -30,7 +34,7 @@ function unauthorized() {
 
 export async function POST(req: Request) {
   const ctx = await authenticateMcp(req);
-  if (!ctx) return unauthorized();
+  if (!ctx) return unauthorized(req);
 
   let payload: unknown;
   try {

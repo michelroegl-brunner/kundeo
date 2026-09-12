@@ -27,7 +27,61 @@ Content-Type: application/json
 - **Methods:** `initialize`, `tools/list`, `tools/call`, `ping`, and the
   `notifications/initialized` notification. JSON-RPC batches are supported.
 
-## Authentication — bearer keys
+## Authentication
+
+Two ways to authenticate, both org-scoped and both resolved through the single
+`authenticateMcp()` seam:
+
+1. **OAuth 2.1 (recommended for remote agents)** — the client discovers the
+   server and runs the standard authorization flow; the user approves it in a
+   consent screen. No token is ever pasted by hand. See below.
+2. **Manual bearer keys** — a self-host convenience: create a key in the UI and
+   hand it to the client. See *Bearer keys*.
+
+An access token from either path is sent the same way:
+`Authorization: Bearer <token>`. OAuth access tokens (`kundeo_mcp_at_…`) are
+tried first; manual keys (`kundeo_mcp_…`) are the fallback.
+
+## OAuth 2.1 (discovery flow)
+
+A minimal in-app authorization server implements exactly what MCP clients need:
+
+- **Protected-resource metadata** (RFC 9728) at
+  `/.well-known/oauth-protected-resource`, advertised in the `401`
+  `WWW-Authenticate: Bearer … resource_metadata="…"` header from `/api/mcp`.
+- **Authorization-server metadata** (RFC 8414) at
+  `/.well-known/oauth-authorization-server`.
+- **Dynamic client registration** (RFC 7591) at `POST /api/mcp/oauth/register`.
+- **Authorization endpoint** at `/api/mcp/oauth/authorize` — reuses the user's
+  Better Auth session (bouncing through `/login` if needed) and shows a consent
+  screen that binds the grant to the user's **active organization**. Requires
+  **PKCE (S256)**.
+- **Token endpoint** at `/api/mcp/oauth/token` — `authorization_code` (with PKCE
+  verification) and `refresh_token` (rotating) grants. Access tokens live 1 hour,
+  refresh tokens 30 days.
+
+The flow a client runs:
+
+```
+GET  /api/mcp                       → 401 + resource_metadata
+GET  /.well-known/oauth-protected-resource   → authorization_servers
+GET  /.well-known/oauth-authorization-server → endpoints
+POST /api/mcp/oauth/register        → client_id (public, PKCE)
+open /api/mcp/oauth/authorize?…     → user consents → redirect ?code=…
+POST /api/mcp/oauth/token           → access_token + refresh_token
+POST /api/mcp   (Bearer access_token)
+```
+
+Scopes map to access levels: `crm:read` → read-only, `crm:read crm:write` →
+read/write. Connected clients are listed under *Einstellungen → Integrationen →
+MCP-Zugriff* and can be revoked there at any time (revocation is immediate).
+
+Security notes: authorization codes are single-use and PKCE-bound (reuse revokes
+the tokens derived from them); refresh tokens rotate on use; all client secrets,
+codes and tokens are stored only as SHA-256 hashes; `redirect_uri` must match a
+registered URI exactly.
+
+## Bearer keys
 
 Keys are managed under **Einstellungen → Integrationen → MCP-Zugriff** (admin or
 owner role required to create or revoke).
@@ -74,7 +128,14 @@ Writes dispatch the same automation triggers as the UI (`contact.created`,
 
 ## Connecting a client
 
-Any MCP client that speaks Streamable HTTP with a bearer token works. Example
+**OAuth-capable clients** (Claude Cowork, claude.ai connectors) need only the
+endpoint URL — they discover everything else and walk you through consent:
+
+```
+https://your-kundeo.example.com/api/mcp
+```
+
+**Manual bearer keys** work with any client that speaks Streamable HTTP. Example
 `.mcp.json` / client config entry:
 
 ```json
@@ -101,9 +162,12 @@ curl -s https://your-kundeo.example.com/api/mcp \
 ## Design notes
 
 - **Auth is a seam.** `lib/mcp/auth.ts#authenticateMcp` is the single place
-  identity is resolved. A hosted edition could add OAuth here without touching
-  the protocol handler (`lib/mcp/server.ts`) or the tools (`lib/mcp/tools.ts`).
+  identity is resolved — OAuth access tokens and manual keys both flow through
+  it, and the protocol handler (`lib/mcp/server.ts`) and tools
+  (`lib/mcp/tools.ts`) never see how the caller authenticated.
 - **Stateless by choice.** No `Mcp-Session-Id`, no SSE — the simplest thing that
   serves tool-using clients and needs nothing extra to self-host.
-- **Additive.** No core tables or flows changed: one new auth-infra table, one
-  route, one settings screen. With no keys created, the feature is inert.
+- **Additive.** No core tables or flows changed: new auth-infra tables, routes,
+  and one settings screen. With nothing connected, the feature is inert. The
+  OAuth server reuses the existing Better Auth session for the human step, so no
+  password handling was added.
