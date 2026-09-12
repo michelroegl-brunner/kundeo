@@ -106,6 +106,75 @@ export async function createMcpKey(name: string, scope: McpScope): Promise<Creat
   return { ok: true, token, key: toItem(key) };
 }
 
+export interface McpConnectionItem {
+  clientId: string;
+  clientName: string;
+  scope: McpScope;
+  connectedAt: string;
+  lastUsedAt: string | null;
+}
+
+/**
+ * List OAuth-connected agents for the org: one row per client with a live
+ * (non-revoked, unexpired) access token, showing its most recent activity.
+ */
+export async function listMcpConnections(): Promise<McpConnectionItem[]> {
+  const orgId = await ensureActiveOrgId();
+  if (!orgId) return [];
+
+  const tokens = await prisma.mcpAccessToken.findMany({
+    where: { organizationId: orgId, revokedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: "desc" },
+    select: { clientId: true, scope: true, createdAt: true, lastUsedAt: true },
+  });
+  if (tokens.length === 0) return [];
+
+  const clients = await prisma.mcpOAuthClient.findMany({
+    where: { id: { in: [...new Set(tokens.map((t) => t.clientId))] } },
+    select: { id: true, clientName: true },
+  });
+  const nameOf = new Map(clients.map((c) => [c.id, c.clientName]));
+
+  // Collapse the per-token rows into one row per client (its latest activity).
+  const byClient = new Map<string, McpConnectionItem>();
+  for (const t of tokens) {
+    const existing = byClient.get(t.clientId);
+    const lastUsed = t.lastUsedAt?.toISOString() ?? null;
+    if (!existing) {
+      byClient.set(t.clientId, {
+        clientId: t.clientId,
+        clientName: nameOf.get(t.clientId) ?? "MCP Client",
+        scope: t.scope === "read_only" ? "read_only" : "read_write",
+        connectedAt: t.createdAt.toISOString(),
+        lastUsedAt: lastUsed,
+      });
+    } else if (lastUsed && (!existing.lastUsedAt || lastUsed > existing.lastUsedAt)) {
+      existing.lastUsedAt = lastUsed;
+    }
+  }
+  return [...byClient.values()];
+}
+
+/** Revoke every live token this org granted to an OAuth client. */
+export async function revokeMcpConnection(clientId: string): Promise<ActionResult> {
+  try {
+    await requireOrgRole("admin");
+  } catch {
+    return { ok: false, error: "Keine Berechtigung." };
+  }
+  const orgId = await ensureActiveOrgId();
+  if (!orgId) return { ok: false, error: "Keine aktive Organisation." };
+
+  const res = await prisma.mcpAccessToken.updateMany({
+    where: { clientId, organizationId: orgId, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  if (res.count === 0) return { ok: false, error: "Keine aktive Verbindung gefunden." };
+
+  revalidatePath("/settings/mcp");
+  return { ok: true };
+}
+
 /** Revoke a key immediately. Idempotent; scoped to the caller's org. */
 export async function revokeMcpKey(id: string): Promise<ActionResult> {
   try {

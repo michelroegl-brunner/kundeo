@@ -26,9 +26,12 @@ function MicrosoftLogo() {
 export function AuthScreen({
   mode,
   entraEnabled = false,
+  callbackURL = "/dashboard",
 }: {
   mode: "login" | "signup";
   entraEnabled?: boolean;
+  /** Where to land after a successful sign-in. Internal path only. */
+  callbackURL?: string;
 }) {
   const router = useRouter();
   const [loading, setLoading] = useState(false);
@@ -49,7 +52,7 @@ export function AuthScreen({
     setEntraLoading(true);
     const res = await authClient.signIn.social({
       provider: "microsoft",
-      callbackURL: "/dashboard",
+      callbackURL,
     });
     // On success the browser is redirected to Microsoft; we only land here on error.
     if (res?.error) {
@@ -76,7 +79,7 @@ export function AuthScreen({
       setError(res.error.message ?? "Anmeldung nicht möglich. Bitte erneut versuchen.");
       return;
     }
-    router.push("/dashboard");
+    router.push(callbackURL);
     router.refresh();
   }
 
