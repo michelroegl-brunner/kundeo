@@ -1,6 +1,6 @@
 import { notFound } from "next/navigation";
 import type { ReactNode } from "react";
-import { scoped } from "@/lib/session";
+import { ensureActiveOrgId, scoped } from "@/lib/session";
 import { Card } from "@/components/ui/card";
 import { Avatar } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +12,8 @@ import {
   type CompanyContactRow,
   type CompanyDeal,
 } from "@/components/companies/company-panels";
+import { CompanyFreeFinanceCard } from "@/components/companies/company-freefinance-card";
+import { resolveFreeFinanceConfigPublic } from "@/lib/freefinance/config";
 
 export const dynamic = "force-dynamic";
 
@@ -55,10 +57,15 @@ function ActionLink({ href, icon, children, variant = "primary" }: { href: strin
 
 export default async function CompanyDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const orgId = await ensureActiveOrgId();
 
   const data = await scoped(async (db) => {
     const company = await db.company.findFirst({ where: { id } });
     if (!company) return null;
+
+    const externalRef = await db.externalRef.findFirst({
+      where: { provider: "freefinance", entityType: "customer", entityId: id },
+    });
 
     const [contacts, deals, members] = await Promise.all([
       db.contact.findMany({ where: { companyId: id }, orderBy: [{ lastName: "asc" }, { firstName: "asc" }] }),
@@ -81,11 +88,16 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
           })
         : [];
 
-    return { company, contacts, deals, members, activities };
+    return { company, contacts, deals, members, activities, externalRef };
   });
 
   if (!data) notFound();
-  const { company, contacts, deals, members, activities } = data;
+  const { company, contacts, deals, members, activities, externalRef } = data;
+
+  // Capability gate: only resolve the FreeFinance config (and render the block)
+  // when the integration is connected for this org.
+  const ffConfig = orgId ? await resolveFreeFinanceConfigPublic(orgId) : null;
+  const ffConnected = Boolean(ffConfig && ffConfig.source);
 
   const nameById = new Map(members.map((m) => [m.user.id, m.user.name]));
   const now = Date.now();
@@ -192,6 +204,16 @@ export default async function CompanyDetailPage({ params }: { params: Promise<{ 
         />
 
         <div className="flex flex-col gap-4">
+          {ffConnected ? (
+            <CompanyFreeFinanceCard
+              companyId={company.id}
+              synced={Boolean(externalRef)}
+              customerNumber={externalRef?.externalNumber}
+              syncedAt={externalRef ? externalRef.syncedAt.toISOString() : null}
+              openUrl={ffConfig?.baseUrl || null}
+            />
+          ) : null}
+
           <Card title="Kennzahlen">
             <Line label="Offene Deals" value={String(openDeals.length)} mono />
             <Line label="Volumen" value={formatMoney(volumeCents, "EUR")} mono />

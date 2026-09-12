@@ -105,8 +105,8 @@ export async function testFreeFinanceConnection(): Promise<
     const clients = await client.listClients();
     const ref = await getReferenceData(orgId, client, true);
 
-    // Identify the configured Mandant among the accessible clients.
-    const mandant = clients.find((c) => ref.features.length >= 0) ?? clients[0];
+    // The configured Mandant is the first accessible client.
+    const mandant = clients[0];
     const capabilities: CapabilityResult = {
       mandantLabel: mandant?.display_name,
       productType: mandant?.product_type,

@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { scoped } from "@/lib/session";
 import { getFreeFinanceClient } from "@/lib/freefinance";
-import { getReferenceData } from "@/lib/freefinance/refdata";
 import { postDocument } from "@/lib/freefinance/sync";
 import { documentTotals, decimalToCents, type DiscountMode } from "@/lib/freefinance/totals";
 import { FreeFinanceApiError } from "@/lib/freefinance/errors";
