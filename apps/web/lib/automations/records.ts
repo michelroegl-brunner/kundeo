@@ -11,6 +11,7 @@
  */
 import type { Prisma } from "@kundeo/db";
 import { FIELDS, type FilterClause, type FieldKind } from "@/components/automations/catalogue";
+import { formatDate, formatMoney } from "@/lib/format";
 
 /** English record type as stored on WorkflowRun.recordType. */
 export type RecordType = "Deal" | "Contact" | "Company" | "Task";
@@ -154,4 +155,66 @@ export function evaluateAll(clauses: FilterClause[], loaded: LoadedRecord): bool
 /** DSGVO gate: has this contact recorded email consent? */
 export function contactEmailConsent(contact: { emailConsent?: boolean } | null | undefined): boolean {
   return contact?.emailConsent === true;
+}
+
+/** The contact/company/deal a loaded record resolves to, following relations. */
+function relatedObjects(loaded: LoadedRecord | null): {
+  contact: Record<string, unknown> | null;
+  company: Record<string, unknown> | null;
+  deal: Record<string, unknown> | null;
+} {
+  if (!loaded) return { contact: null, company: null, deal: null };
+  const d = loaded.data;
+  if (loaded.type === "Contact") return { contact: d, company: d.company ?? null, deal: null };
+  if (loaded.type === "Company") return { contact: null, company: d, deal: null };
+  if (loaded.type === "Deal") return { contact: d.contact ?? null, company: d.company ?? null, deal: d };
+  // Task
+  return {
+    contact: d.contact ?? null,
+    company: d.contact?.company ?? d.deal?.company ?? null,
+    deal: d.deal ?? null,
+  };
+}
+
+/**
+ * Resolve concrete values for email-template tokens (see email-tokens.ts) from
+ * the record a run operates on, plus org/user context. Missing values are left
+ * out — the renderer substitutes an empty string for anything absent.
+ */
+export async function templateValues(
+  tx: Tx,
+  loaded: LoadedRecord | null,
+  organizationId: string,
+): Promise<Record<string, string>> {
+  const values: Record<string, string> = { today: formatDate(new Date()) };
+
+  const org = await tx.organization.findUnique({ where: { id: organizationId }, select: { name: true } });
+  if (org?.name) values["org.name"] = org.name;
+
+  const { contact, company, deal } = relatedObjects(loaded);
+
+  if (contact) {
+    values["contact.salutation"] = String(contact.salutation ?? "");
+    values["contact.firstName"] = String(contact.firstName ?? "");
+    values["contact.lastName"] = String(contact.lastName ?? "");
+    values["contact.email"] = String(contact.email ?? "");
+  }
+  if (company) {
+    values["company.name"] = String(company.name ?? "");
+    values["company.city"] = String(company.city ?? "");
+    values["company.vatId"] = String(company.vatId ?? "");
+  }
+  if (deal) {
+    values["deal.title"] = String(deal.title ?? "");
+    values["deal.amount"] = formatMoney(Number(deal.amountCents ?? 0), String(deal.currency ?? "EUR"));
+    values["deal.stage"] = String((deal.stage as { name?: string } | null)?.name ?? "");
+    values["deal.closeDate"] = deal.expectedCloseAt ? formatDate(deal.expectedCloseAt as Date) : "";
+    const ownerId = deal.ownerId ? String(deal.ownerId) : "";
+    if (ownerId) {
+      const owner = await tx.user.findUnique({ where: { id: ownerId }, select: { name: true } });
+      if (owner?.name) values["deal.owner"] = owner.name;
+    }
+  }
+
+  return values;
 }

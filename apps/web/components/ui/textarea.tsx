@@ -1,4 +1,4 @@
-import type { CSSProperties, TextareaHTMLAttributes } from "react";
+import { forwardRef, type CSSProperties, type TextareaHTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
 export interface TextareaProps
@@ -10,9 +10,13 @@ export interface TextareaProps
   style?: CSSProperties;
 }
 
-export function Textarea({ rows = 4, invalid = false, disabled = false, className, style, ...rest }: TextareaProps) {
+export const Textarea = forwardRef<HTMLTextAreaElement, TextareaProps>(function Textarea(
+  { rows = 4, invalid = false, disabled = false, className, style, ...rest },
+  ref,
+) {
   return (
     <textarea
+      ref={ref}
       rows={rows}
       disabled={disabled}
       aria-invalid={invalid || undefined}
@@ -28,4 +32,4 @@ export function Textarea({ rows = 4, invalid = false, disabled = false, classNam
       {...rest}
     />
   );
-}
+});

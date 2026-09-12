@@ -8,16 +8,18 @@ export const dynamic = "force-dynamic";
 export default async function BuilderPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
 
-  const workflow = await scoped((db) =>
-    db.workflow.findUnique({
+  const { workflow, emailTemplates } = await scoped(async (db) => {
+    const workflow = await db.workflow.findUnique({
       where: { id },
       include: {
         steps: {
           select: { id: true, kind: true, type: true, order: true, parentStepId: true, branchPath: true, config: true },
         },
       },
-    }),
-  );
+    });
+    const emailTemplates = await db.emailTemplate.findMany({ select: { id: true, name: true }, orderBy: { name: "asc" } });
+    return { workflow, emailTemplates };
+  });
   if (!workflow) notFound();
 
   const tree = buildTree(workflow.steps as FlatStep[]);
@@ -29,6 +31,7 @@ export default async function BuilderPage({ params }: { params: Promise<{ id: st
       <FlowBuilder
         workflow={{ id: workflow.id, name: workflow.name, isActive: workflow.isActive, version: workflow.version }}
         initialSteps={tree}
+        emailTemplates={emailTemplates}
       />
     </div>
   );

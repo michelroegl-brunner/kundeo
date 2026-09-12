@@ -20,11 +20,16 @@ export interface EmailMessage {
   organizationId: string;
   to: string;
   subject: string;
-  /** Plain-text body. Rich templates arrive with the email-templates feature. */
+  /** Plain-text body (the template body with tokens substituted). */
   text: string;
+  /** Optional HTML body (the Markdown template rendered). Sent when present. */
+  html?: string;
   /** The named template the automation selected, for the log line. */
   templateName?: string;
 }
+
+/** Which transport this process would use — for UI notices (e.g. the log warning). */
+export type EmailProvider = "log" | "smtp" | "m365";
 
 export interface EmailResult {
   /** true = handed to a transport; false = recorded only (no transport). */
@@ -75,7 +80,13 @@ class SmtpEmailSender implements EmailSender {
 
   async send(message: EmailMessage): Promise<EmailResult> {
     const transport = await this.ensureTransport();
-    await transport.sendMail({ from: this.cfg.from, to: message.to, subject: message.subject, text: message.text });
+    await transport.sendMail({
+      from: this.cfg.from,
+      to: message.to,
+      subject: message.subject,
+      text: message.text,
+      ...(message.html ? { html: message.html } : {}),
+    });
     return { delivered: true, detail: `E-Mail über SMTP an ${message.to} gesendet` };
   }
 }
@@ -116,7 +127,9 @@ class M365GraphEmailSender implements EmailSender {
         body: JSON.stringify({
           message: {
             subject: message.subject,
-            body: { contentType: "Text", content: message.text },
+            body: message.html
+              ? { contentType: "HTML", content: message.html }
+              : { contentType: "Text", content: message.text },
             toRecipients: [{ emailAddress: { address: message.to } }],
           },
           saveToSentItems: false,
@@ -166,6 +179,23 @@ function resolveSender(): EmailSender {
   }
 
   return new LogEmailSender();
+}
+
+/**
+ * Which provider this process would use, without constructing a sender. The
+ * settings UI reads this to show the honest "Versandart Protokoll" notice.
+ * Mirrors the branching in `resolveSender`.
+ */
+export function resolveEmailProvider(): EmailProvider {
+  const explicit = (env("KUNDEO_EMAIL_PROVIDER") ?? "").toLowerCase();
+  const m365Complete = Boolean(
+    env("KUNDEO_M365_TENANT_ID") && env("KUNDEO_M365_CLIENT_ID") && env("KUNDEO_M365_CLIENT_SECRET") && env("KUNDEO_M365_SENDER"),
+  );
+  const smtpHost = env("KUNDEO_SMTP_HOST");
+
+  if (explicit === "m365" || (!explicit && m365Complete)) return m365Complete ? "m365" : "log";
+  if (explicit === "smtp" || (!explicit && smtpHost)) return smtpHost ? "smtp" : "log";
+  return "log";
 }
 
 let sender: EmailSender | null = null;

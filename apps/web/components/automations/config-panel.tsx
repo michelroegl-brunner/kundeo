@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type ReactNode } from "react";
+import Link from "next/link";
 import { Icon } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
@@ -30,7 +31,6 @@ import {
 const TRIGGERS = PALETTE.find((g) => g.group === "Auslöser")!.items;
 const ACTIONS = PALETTE.find((g) => g.group === "Aktionen")!.items;
 
-const TEMPLATES = ["Willkommen", "Willkommen Enterprise", "Angebot nachfassen", "Onboarding-Termin"];
 const RECIPIENTS = [
   { value: "contact", label: "Der Kontakt am Deal" },
   { value: "owner", label: "Der Deal-Inhaber" },
@@ -279,16 +279,24 @@ function RelativeTiming({
   );
 }
 
+export interface EmailTemplateOption {
+  id: string;
+  name: string;
+}
+
 export function ConfigPanel({
   step,
   onChange,
   onClose,
   onDelete,
+  emailTemplates = [],
 }: {
   step: FlowStep | null;
   onChange: (next: FlowStep) => void;
   onClose: () => void;
   onDelete: (id: string) => void;
+  /** Org email templates the "E-Mail senden" action can select. */
+  emailTemplates?: EmailTemplateOption[];
 }) {
   if (!step) {
     return (
@@ -382,13 +390,28 @@ export function ConfigPanel({
   } else if (step.type === "email.send") {
     body = (
       <>
-        <Field label="E-Mail-Vorlage" required>
-          <Select placeholder="Vorlage wählen" value={s("template")} onChange={(e) => set({ template: e.target.value })} options={TEMPLATES} />
-        </Field>
+        {emailTemplates.length ? (
+          <Field label="E-Mail-Vorlage" required hint="Betreff und Inhalt stammen aus der Vorlage.">
+            <Select
+              placeholder="Vorlage wählen"
+              value={s("templateId")}
+              onChange={(e) => {
+                const tpl = emailTemplates.find((t) => t.id === e.target.value);
+                set({ templateId: e.target.value, template: tpl?.name ?? "" });
+              }}
+              options={emailTemplates.map((t) => ({ value: t.id, label: t.name }))}
+            />
+          </Field>
+        ) : (
+          <div className="flex flex-col gap-2 rounded-md p-3" style={{ background: "var(--surface-warning-subtle)", border: "1px solid var(--amber-500)" }}>
+            <p className="text-xs font-medium text-content">Noch keine E-Mail-Vorlage</p>
+            <p className="text-2xs leading-normal text-content-secondary">Legen Sie in den Einstellungen eine Vorlage an.</p>
+            <Link href="/settings" className="text-2xs font-medium text-content-brand hover:underline">Einstellungen öffnen</Link>
+          </div>
+        )}
         <Field label="Empfänger">
           <Select value={s("recipient", "contact")} onChange={(e) => set({ recipient: e.target.value })} options={RECIPIENTS} />
         </Field>
-        <TokenField label="Betreff" text={s("subject")} tokens={arr("subjectTokens")} onText={(v) => set({ subject: v })} onTokens={(t) => set({ subjectTokens: t })} />
         <ConsentBlock checked={c.consent !== false} onChange={(v) => set({ consent: v })} />
       </>
     );

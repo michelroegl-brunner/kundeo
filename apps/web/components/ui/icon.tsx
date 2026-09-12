@@ -89,6 +89,11 @@ import {
   Braces,
   CircleMinus,
   Timer,
+  Copy,
+  Bold,
+  Italic,
+  Link,
+  ListOrdered,
   type LucideIcon,
 } from "lucide-react";
 
@@ -191,6 +196,11 @@ const ICONS: Record<string, LucideIcon> = {
   braces: Braces,
   "circle-minus": CircleMinus,
   timer: Timer,
+  copy: Copy,
+  bold: Bold,
+  italic: Italic,
+  link: Link,
+  "list-ordered": ListOrdered,
 };
 
 export interface IconProps {

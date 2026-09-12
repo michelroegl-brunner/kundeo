@@ -220,7 +220,7 @@ export const KIND_META: Record<StepKind, { label: string; color: string; bg: str
 /** Config keys a step must have set before the workflow can be published. */
 const REQUIRED_CONFIG: Record<string, string[]> = {
   "task.create": ["title"],
-  "email.send": ["template"],
+  "email.send": ["templateId"],
   "note.add": ["text"],
   notify: ["text"],
   "wait.duration": ["amount"],
@@ -248,9 +248,12 @@ function present(v: unknown): boolean {
 
 /** A step is complete once every required config key is filled. */
 export function isStepComplete(type: string, config: unknown): boolean {
+  const c = asConfig(config);
+  // email.send now references a template by id; accept a legacy `template` name
+  // so steps saved before the email-templates feature still count as complete.
+  if (type === "email.send") return present(c.templateId) || present(c.template);
   const required = REQUIRED_CONFIG[type];
   if (!required) return true;
-  const c = asConfig(config);
   return required.every((k) => present(c[k]));
 }
 

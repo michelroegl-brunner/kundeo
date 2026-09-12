@@ -26,6 +26,9 @@ import {
   deletePipeline,
   type ActionResult,
 } from "@/app/(app)/settings/actions";
+import { EmailTemplatesTab } from "@/components/settings/email-templates/email-templates-tab";
+import type { EmailProvider } from "@/lib/email";
+import type { EmailTemplateItem, PreviewRecord } from "@/components/settings/email-templates/types";
 
 const CURRENCY_OPTIONS = [
   { value: "EUR", label: "Euro (EUR)" },
@@ -72,30 +75,45 @@ export interface SettingsViewProps {
   pipelines: PipelineItem[];
   prefs: NotificationPrefs;
   instance: InstanceInfo;
+  templates: EmailTemplateItem[];
+  templateCategories: string[];
+  emailProvider: EmailProvider;
+  previewRecords: PreviewRecord[];
 }
 
-export function SettingsView({ org, orgIdMasked, pipelines, prefs, instance }: SettingsViewProps) {
+export function SettingsView({
+  org,
+  orgIdMasked,
+  pipelines,
+  prefs,
+  instance,
+  templates,
+  templateCategories,
+  emailProvider,
+  previewRecords,
+}: SettingsViewProps) {
   const router = useRouter();
   const [tab, setTab] = useState("org");
   const [pending, startTransition] = useTransition();
   const [toast, setToast] = useState<ToastProps | null>(null);
 
-  function run(fn: () => Promise<ActionResult>, ok: ToastProps, after?: () => void) {
+  const run: RunFn = (fn, ok, after) => {
     startTransition(async () => {
       const res = await fn();
       if (res.ok) {
-        setToast(ok);
+        setToast(typeof ok === "function" ? ok(res) : ok);
         after?.();
         router.refresh();
       } else {
         setToast({ tone: "danger", title: "Aktion fehlgeschlagen", description: res.error });
       }
     });
-  }
+  };
 
   const tabs = [
     { id: "org", label: "Organisation", icon: "building-2" },
     { id: "pipelines", label: "Pipelines", icon: "kanban" },
+    { id: "emailTemplates", label: "E-Mail-Vorlagen", icon: "mail" },
     { id: "notifications", label: "Benachrichtigungen", icon: "bell" },
     { id: "instance", label: "Instanz", icon: "server" },
   ];
@@ -108,6 +126,15 @@ export function SettingsView({ org, orgIdMasked, pipelines, prefs, instance }: S
         <OrgTab org={org} orgIdMasked={orgIdMasked} pending={pending} run={run} />
       ) : tab === "pipelines" ? (
         <PipelinesTab pipelines={pipelines} pending={pending} run={run} />
+      ) : tab === "emailTemplates" ? (
+        <EmailTemplatesTab
+          templates={templates}
+          categories={templateCategories}
+          emailProvider={emailProvider}
+          previewRecords={previewRecords}
+          pending={pending}
+          run={run}
+        />
       ) : tab === "notifications" ? (
         <NotificationsTab prefs={prefs} pending={pending} run={run} />
       ) : (
@@ -123,7 +150,13 @@ export function SettingsView({ org, orgIdMasked, pipelines, prefs, instance }: S
   );
 }
 
-type RunFn = (fn: () => Promise<ActionResult>, ok: ToastProps, after?: () => void) => void;
+/** Shared runner: `ok` is a static toast, or one computed from the action result. */
+export type RunResult = ActionResult & Record<string, unknown>;
+export type RunFn = (
+  fn: () => Promise<RunResult>,
+  ok: ToastProps | ((res: RunResult) => ToastProps),
+  after?: () => void,
+) => void;
 
 function OrgTab({
   org,

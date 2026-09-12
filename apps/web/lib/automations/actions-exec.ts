@@ -12,8 +12,10 @@
  */
 import type { Prisma } from "@kundeo/db";
 import type { EmailMessage } from "@/lib/email";
+import { renderTemplate } from "@/lib/email/render-template";
+import { renderMarkdown } from "@/lib/email/markdown";
 import type { LoadedRecord } from "./records";
-import { contactEmailConsent, parseMoneyToCents } from "./records";
+import { contactEmailConsent, parseMoneyToCents, templateValues } from "./records";
 
 type Tx = Prisma.TransactionClient;
 
@@ -123,8 +125,9 @@ async function addNote(ctx: ActionContext): Promise<ActionOutcome> {
 }
 
 async function sendEmail(ctx: ActionContext): Promise<ActionOutcome> {
-  const template = str(ctx.config.template);
-  if (!template) return { status: "SKIPPED", message: "Keine E-Mail-Vorlage gewählt" };
+  const templateId = str(ctx.config.templateId);
+  const templateName = str(ctx.config.template); // legacy label / fallback selector
+  if (!templateId && !templateName) return { status: "SKIPPED", message: "Keine E-Mail-Vorlage gewählt" };
 
   const contact = recipientContact(ctx.loaded);
   if (!contact) return { status: "SKIPPED", message: "Kein Kontakt für den Versand" };
@@ -139,15 +142,34 @@ async function sendEmail(ctx: ActionContext): Promise<ActionOutcome> {
     };
   }
 
-  // The actual send is deferred to the post-commit outbox (no network in the
-  // run transaction). The step is provisionally OK; the runner updates it with
-  // the transport's result, or to ERROR if delivery fails.
+  // Resolve the template by id (RLS scopes to the org); fall back to its name for
+  // legacy steps saved before templates were referenced by id.
+  const template = templateId
+    ? await ctx.tx.emailTemplate.findFirst({ where: { id: templateId } })
+    : await ctx.tx.emailTemplate.findFirst({ where: { name: templateName! } });
+  if (!template) return { status: "SKIPPED", message: "E-Mail-Vorlage nicht gefunden" };
+
+  // Substitute the tokens against the triggering record, and render the Markdown
+  // body to HTML. The actual send is deferred to the post-commit outbox (no
+  // network in the run transaction); the runner updates the step with the
+  // transport's result, or to ERROR if delivery fails.
+  const values = await templateValues(ctx.tx, ctx.loaded, ctx.organizationId);
+  const rendered = renderTemplate({ subject: template.subject, body: template.body }, values);
+  const html = renderMarkdown(rendered.body);
+
   return {
     status: "OK",
-    message: `E-Mail „${template}“ an ${to} – wird gesendet`,
+    message: `E-Mail „${template.name}“ an ${to} – wird gesendet`,
     sideEffect: {
       kind: "email",
-      email: { organizationId: ctx.organizationId, to, subject: template, text: `Vorlage: ${template}`, templateName: template },
+      email: {
+        organizationId: ctx.organizationId,
+        to,
+        subject: rendered.subject,
+        text: rendered.body,
+        html,
+        templateName: template.name,
+      },
     },
   };
 }

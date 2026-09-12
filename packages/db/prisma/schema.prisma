@@ -112,6 +112,9 @@ model Organization {
   workflows    Workflow[]
   workflowRuns WorkflowRun[]
 
+  // tenant-scoped email templates (referenced by the email.send automation action)
+  emailTemplates EmailTemplate[]
+
   @@map("organization")
 }
 
@@ -350,6 +353,28 @@ model ContactTag {
 
   @@id([contactId, tagId])
   @@map("contact_tag")
+}
+
+// Reusable email content the `email.send` automation action selects. Referenced
+// by id from the step config (name denormalized as a display/log label). Body is
+// Markdown with literal {{token}} placeholders substituted at send time. Managed
+// from Settings → E-Mail-Vorlagen; tenant-scoped, RLS-enforced.
+model EmailTemplate {
+  id             String   @id @default(cuid())
+  organizationId String
+  name           String
+  subject        String
+  body           String // Markdown with literal {{token}} placeholders
+  description    String?
+  category       String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@unique([organizationId, name])
+  @@index([organizationId, updatedAt])
+  @@map("email_template")
 }
 
 // ───────────────────────────────────────────────────────────────────────────

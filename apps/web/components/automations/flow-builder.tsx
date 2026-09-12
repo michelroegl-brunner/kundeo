@@ -12,7 +12,7 @@ import { Tooltip } from "@/components/ui/tooltip";
 import { Toast } from "@/components/ui/toast";
 import { StepCard, Connector, EndCap, Fork, Merge } from "./flow-steps";
 import { Palette, InsertDialog, TestRunDialog, useNarrow } from "./builder-parts";
-import { ConfigPanel } from "./config-panel";
+import { ConfigPanel, type EmailTemplateOption } from "./config-panel";
 import {
   flattenTree,
   isStepComplete,
@@ -47,7 +47,15 @@ function makeStep(item: NodeDef): FlowStep {
   return { id: sid(), kind: item.kind, type: item.type, config: {} };
 }
 
-export function FlowBuilder({ workflow, initialSteps }: { workflow: BuilderWorkflow; initialSteps: FlowStep[] }) {
+export function FlowBuilder({
+  workflow,
+  initialSteps,
+  emailTemplates = [],
+}: {
+  workflow: BuilderWorkflow;
+  initialSteps: FlowStep[];
+  emailTemplates?: EmailTemplateOption[];
+}) {
   const router = useRouter();
   const narrow = useNarrow();
 
@@ -390,13 +398,13 @@ export function FlowBuilder({ workflow, initialSteps }: { workflow: BuilderWorkf
           panelOpen && selectedStep ? (
             <div className="absolute inset-0 z-50 flex justify-end" style={{ background: "var(--surface-overlay)" }} onClick={() => setPanelOpen(false)}>
               <div onClick={(e) => e.stopPropagation()} className="w-[min(380px,92%)] border-l border-edge bg-surface-card shadow-xl">
-                <ConfigPanel step={selectedStep} onChange={updateStep} onClose={() => setPanelOpen(false)} onDelete={remove} />
+                <ConfigPanel step={selectedStep} onChange={updateStep} onClose={() => setPanelOpen(false)} onDelete={remove} emailTemplates={emailTemplates} />
               </div>
             </div>
           ) : null
         ) : (
           <aside className="min-w-0 overflow-hidden border-l border-edge bg-surface-card">
-            <ConfigPanel step={selectedStep} onChange={updateStep} onClose={() => setSelected(null)} onDelete={remove} />
+            <ConfigPanel step={selectedStep} onChange={updateStep} onClose={() => setSelected(null)} onDelete={remove} emailTemplates={emailTemplates} />
           </aside>
         )}
       </div>

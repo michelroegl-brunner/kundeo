@@ -5,6 +5,10 @@ import {
   type NotificationPrefs,
   type PipelineItem,
 } from "@/components/settings/settings-view";
+import { loadEmailTemplateItems } from "@/lib/email/template-usage";
+import { resolveEmailProvider } from "@/lib/email";
+import type { PreviewRecord } from "@/components/settings/email-templates/types";
+import { formatDate, formatMoney } from "@/lib/format";
 import pkg from "../../../package.json";
 
 export const dynamic = "force-dynamic";
@@ -41,7 +45,7 @@ export default async function SettingsPage() {
 
   const meta = parseMetadata(org?.metadata ?? null);
 
-  const { pipelines } = await scoped(async (db) => {
+  const { pipelines, templateItems, contacts } = await scoped(async (db) => {
     const pipelines = await db.pipeline.findMany({
       orderBy: [{ isDefault: "desc" }, { createdAt: "asc" }],
       include: {
@@ -51,7 +55,14 @@ export default async function SettingsPage() {
         },
       },
     });
-    return { pipelines };
+    const templateItems = await loadEmailTemplateItems(db);
+    const contacts = await db.contact.findMany({
+      where: { email: { not: null } },
+      orderBy: { updatedAt: "desc" },
+      take: 12,
+      include: { company: true, deals: { orderBy: { updatedAt: "desc" }, take: 1, include: { stage: true } } },
+    });
+    return { pipelines, templateItems, contacts };
   });
 
   const pipelineItems: PipelineItem[] = pipelines.map((p) => ({
@@ -95,6 +106,40 @@ export default async function SettingsPage() {
     ],
   };
 
+  const orgName = org?.name ?? "";
+  const userName = session?.user.name ?? "";
+  const previewRecords: PreviewRecord[] = contacts.map((c) => {
+    const deal = c.deals[0];
+    const label =
+      [c.salutation, c.title, c.firstName, c.lastName].filter(Boolean).join(" ") +
+      (c.company ? ` · ${c.company.name}` : "");
+    return {
+      id: c.id,
+      label,
+      values: {
+        "contact.salutation": c.salutation ?? "",
+        "contact.firstName": c.firstName,
+        "contact.lastName": c.lastName,
+        "contact.email": c.email ?? "",
+        "company.name": c.company?.name ?? "",
+        "company.city": c.company?.city ?? "",
+        "company.vatId": c.company?.vatId ?? "",
+        "deal.title": deal?.title ?? "",
+        "deal.amount": deal ? formatMoney(deal.amountCents, deal.currency) : "",
+        "deal.stage": deal?.stage?.name ?? "",
+        "deal.closeDate": deal?.expectedCloseAt ? formatDate(deal.expectedCloseAt) : "",
+        "deal.owner": "",
+        today: formatDate(new Date()),
+        "org.name": orgName,
+        "user.name": userName,
+      },
+    };
+  });
+
+  const templateCategories = [...new Set(templateItems.map((t) => t.category).filter((c): c is string => !!c))].sort(
+    (a, b) => a.localeCompare(b, "de"),
+  );
+
   return (
     <SettingsView
       org={orgSettings}
@@ -102,6 +147,10 @@ export default async function SettingsPage() {
       pipelines={pipelineItems}
       prefs={prefs}
       instance={instance}
+      templates={templateItems}
+      templateCategories={templateCategories}
+      emailProvider={resolveEmailProvider()}
+      previewRecords={previewRecords}
     />
   );
 }

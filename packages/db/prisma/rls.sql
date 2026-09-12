@@ -23,7 +23,7 @@ DECLARE
   t text;
   tenant_tables text[] := ARRAY[
     'company', 'contact', 'pipeline', 'deal', 'activity', 'tag',
-    'workflow', 'workflow_run'
+    'workflow', 'workflow_run', 'email_template'
   ];
 BEGIN
   FOREACH t IN ARRAY tenant_tables LOOP

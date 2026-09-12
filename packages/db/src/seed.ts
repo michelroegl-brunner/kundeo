@@ -107,6 +107,85 @@ type RunStatus = "OK" | "ERROR" | "SKIPPED" | "TEST";
 type RunStepStatus = "OK" | "ERROR" | "SKIPPED";
 
 /**
+ * Email templates the demo automations reference. German content with literal
+ * {{token}} placeholders (see apps/web/components/settings/email-tokens.ts).
+ * Idempotent via upsert on (organizationId, name). Returns a name → row map so
+ * the automation seed can wire each email.send step to a real templateId.
+ */
+export async function seedEmailTemplates(prisma: PrismaClient, organizationId: string) {
+  const seed: { name: string; subject: string; body: string; description: string; category: string }[] = [
+    {
+      name: "Willkommen",
+      category: "Onboarding",
+      description: "Erste Begrüßung neuer Kontakte.",
+      subject: "Willkommen bei {{org.name}}, {{contact.firstName}}",
+      body: [
+        "Guten Tag {{contact.salutation}} {{contact.lastName}},",
+        "",
+        "herzlich willkommen bei **{{org.name}}**. Wir freuen uns, Sie an Bord zu haben.",
+        "",
+        "Bei Fragen erreichen Sie uns jederzeit — wir sind gerne für Sie da.",
+        "",
+        "Freundliche Grüße",
+        "{{user.name}}",
+      ].join("\n"),
+    },
+    {
+      name: "Nachfassen",
+      category: "Vertrieb",
+      description: "Erinnerung nach einem versendeten Angebot.",
+      subject: "Ihr Angebot „{{deal.title}}“ — dürfen wir nachfassen?",
+      body: [
+        "Guten Tag {{contact.salutation}} {{contact.lastName}},",
+        "",
+        "wir möchten kurz zu unserem Angebot **{{deal.title}}** über {{deal.amount}} nachfassen.",
+        "",
+        "Gerne besprechen wir offene Punkte mit Ihnen. Melden Sie sich einfach.",
+        "",
+        "Freundliche Grüße",
+        "{{user.name}}",
+      ].join("\n"),
+    },
+    {
+      name: "Großkunden-Begrüßung",
+      category: "Onboarding",
+      description: "Persönliche Begrüßung bei großen Abschlüssen.",
+      subject: "Vielen Dank für Ihr Vertrauen, {{company.name}}",
+      body: [
+        "Guten Tag {{contact.salutation}} {{contact.lastName}},",
+        "",
+        "vielen Dank für den Abschluss von **{{deal.title}}**. Wir freuen uns sehr auf die",
+        "Zusammenarbeit mit {{company.name}}.",
+        "",
+        "Ihre persönliche Ansprechperson meldet sich in Kürze bei Ihnen.",
+        "",
+        "Freundliche Grüße",
+        "{{user.name}}",
+      ].join("\n"),
+    },
+  ];
+
+  const rows: Record<string, { id: string }> = {};
+  for (const t of seed) {
+    const row = await prisma.emailTemplate.upsert({
+      where: { organizationId_name: { organizationId, name: t.name } },
+      update: {},
+      create: {
+        organizationId,
+        name: t.name,
+        subject: t.subject,
+        body: t.body,
+        description: t.description,
+        category: t.category,
+      },
+      select: { id: true },
+    });
+    rows[t.name] = row;
+  }
+  return rows;
+}
+
+/**
  * Automations demo data, mirroring the design kit: six workflows (one
  * branching) and a spread of runs so the list, its KPIs and the run log have
  * something to show. `ownerIds` are existing member user ids to attribute the
@@ -124,6 +203,13 @@ export async function seedAutomations(
 
   const pick = (i: number) => ownerIds[i % ownerIds.length] ?? "system";
   const [anna, jan, lena] = [pick(0), pick(1), pick(2)];
+
+  // Email templates the email.send steps below reference by id. Seeded first so
+  // the demo automations resolve to real, editable templates (Settings →
+  // E-Mail-Vorlagen), not free-string names.
+  const templates = await seedEmailTemplates(prisma, organizationId);
+  const tplId = (name: string) => templates[name]?.id;
+  const emailConfig = (name: string) => ({ templateId: tplId(name), template: name, consent: true });
 
   async function makeWorkflow(
     name: string,
@@ -192,7 +278,7 @@ export async function seedAutomations(
       type: "branch",
       config: { condition: { entity: "Deal", field: "amount", op: "ist größer als", value: "50.000", unit: "EUR" } },
       branch: {
-        yes: [{ kind: "ACTION", type: "email.send", config: { template: "Großkunden-Begrüßung", consent: true } }],
+        yes: [{ kind: "ACTION", type: "email.send", config: emailConfig("Großkunden-Begrüßung") }],
         no: [{ kind: "ACTION", type: "note.add", config: { text: "Onboarding gestartet" } }],
       },
     },
@@ -219,7 +305,7 @@ export async function seedAutomations(
   const a3 = await makeWorkflow("Angebot nachfassen", jan, true, [
     { kind: "TRIGGER", type: "deal.stage", config: { stage: "Angebot", forDays: 7 } },
     { kind: "DELAY", type: "wait.duration", config: { amount: 7, unit: "Tage" } },
-    { kind: "ACTION", type: "email.send", config: { template: "Nachfassen", consent: true } },
+    { kind: "ACTION", type: "email.send", config: emailConfig("Nachfassen") },
     { kind: "ACTION", type: "notify", config: { text: "Angebot nachgefasst" } },
   ]);
   await makeRuns(a3.id, [
@@ -245,7 +331,7 @@ export async function seedAutomations(
   // a6 — draft, never run.
   await makeWorkflow("Willkommens-E-Mail für neue Kontakte", jan, false, [
     { kind: "TRIGGER", type: "contact.created" },
-    { kind: "ACTION", type: "email.send", config: { template: "Willkommen", consent: true } },
+    { kind: "ACTION", type: "email.send", config: emailConfig("Willkommen") },
   ]);
 
   await seedRunSteps(prisma, organizationId);
