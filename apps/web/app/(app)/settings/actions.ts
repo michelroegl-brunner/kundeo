@@ -96,12 +96,15 @@ export async function addStage(pipelineId?: string): Promise<ActionResult> {
   }
 }
 
-/** Creates a new pipeline (not default) with one starter stage. */
+/** Creates a pipeline with one starter stage; the org's first pipeline becomes the default. */
 export async function createPipeline(name: string): Promise<ActionResult> {
   try {
     await scoped(async (db, organizationId) => {
+      // RLS scopes this to the org, so an empty org has no default pipeline —
+      // promote the first one so the deals board is reachable right away.
+      const isFirst = (await db.pipeline.count()) === 0;
       const pipeline = await db.pipeline.create({
-        data: { organizationId, name: name.trim() || "Neue Pipeline", isDefault: false },
+        data: { organizationId, name: name.trim() || "Neue Pipeline", isDefault: isFirst },
       });
       await db.stage.create({ data: { pipelineId: pipeline.id, name: "Neue Phase", order: 0, probability: 0 } });
     });
